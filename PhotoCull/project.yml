@@ -1,0 +1,36 @@
+name: PhotoCull
+options:
+  bundleIdPrefix: com.austingoodnight
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+packages:
+  PhotoCatalog:
+    path: PhotoCatalog
+targets:
+  PhotoCull:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - PhotoCull
+    dependencies:
+      - package: PhotoCatalog
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.austingoodnight.PhotoCull
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGNING_ALLOWED: "YES"
+        DEVELOPMENT_TEAM: ""
+        ENABLE_HARDENED_RUNTIME: "NO"
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_CFBundleDisplayName: PhotoCull
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.photography
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        INFOPLIST_KEY_NSPrincipalClass: NSApplication
+        ENABLE_PREVIEWS: "YES"
