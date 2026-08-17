@@ -47,4 +47,227 @@ struct RawEngineTests {
         let attrs = try FileManager.default.attributesOfItem(atPath: outURL.path)
         #expect((attrs[.size] as? Int ?? 0) > 0)
     }
+
+    @Test func filmicRGBRendersAndDiffersFromPassthrough() throws {
+        guard let url = Self.testFileURL else { return }
+        let renderer = RawImageRenderer()
+        #expect(renderer.load(url: url))
+        let plain = renderer.renderPreview(params: .none, maxPixelSize: 300)
+        let filmic = renderer.renderPreview(
+            params: RawEditParameters(filmicRGB: .darktableDefault),
+            maxPixelSize: 300
+        )
+        let plainData = try #require(plain?.dataProvider?.data)
+        let filmicData = try #require(filmic?.dataProvider?.data)
+        #expect(plainData != filmicData)
+    }
+
+    @Test func filmicRGBExportProducesReadableJPEG() throws {
+        guard let url = Self.testFileURL else { return }
+        let renderer = RawImageRenderer()
+        #expect(renderer.load(url: url))
+        let outURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        defer { try? FileManager.default.removeItem(at: outURL) }
+        try ExportPipeline.export(
+            renderer: renderer,
+            params: RawEditParameters(filmicRGB: .darktableDefault),
+            format: .jpeg(quality: 0.8),
+            to: outURL
+        )
+        let attrs = try FileManager.default.attributesOfItem(atPath: outURL.path)
+        #expect((attrs[.size] as? Int ?? 0) > 0)
+    }
+
+    @Test func colorBalanceRGBRendersAndDiffersFromPassthrough() throws {
+        guard let url = Self.testFileURL else { return }
+        let renderer = RawImageRenderer()
+        #expect(renderer.load(url: url))
+        var wheels = ColorBalanceRGBParameters.darktableDefault
+        wheels.globalY = 0.15
+        wheels.shadowsC = 0.3
+        wheels.shadowsH = 30
+        let plain = renderer.renderPreview(params: .none, maxPixelSize: 300)
+        let graded = renderer.renderPreview(
+            params: RawEditParameters(colorBalanceRGB: wheels),
+            maxPixelSize: 300
+        )
+        let plainData = try #require(plain?.dataProvider?.data)
+        let gradedData = try #require(graded?.dataProvider?.data)
+        #expect(plainData != gradedData)
+    }
+
+    @Test func colorBalanceRGBExportProducesReadableJPEG() throws {
+        guard let url = Self.testFileURL else { return }
+        let renderer = RawImageRenderer()
+        #expect(renderer.load(url: url))
+        let outURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        defer { try? FileManager.default.removeItem(at: outURL) }
+        var wheels = ColorBalanceRGBParameters.darktableDefault
+        wheels.contrast = 0.2
+        try ExportPipeline.export(
+            renderer: renderer,
+            params: RawEditParameters(filmicRGB: .darktableDefault, colorBalanceRGB: wheels),
+            format: .jpeg(quality: 0.8),
+            to: outURL
+        )
+        let attrs = try FileManager.default.attributesOfItem(atPath: outURL.path)
+        #expect((attrs[.size] as? Int ?? 0) > 0)
+    }
+}
+
+@Suite("FilmicSpline")
+struct FilmicSplineTests {
+    @Test func splineIsContinuousAtLatitudeBoundaries() {
+        let spline = FilmicSpline.compute(.darktableDefault)
+        let epsilon = 1e-4
+
+        let belowToe = FilmicSpline.evaluate(spline.latitudeMin - epsilon, spline)
+        let atToe = FilmicSpline.evaluate(spline.latitudeMin, spline)
+        #expect(abs(belowToe - atToe) < 1e-3)
+
+        let belowShoulder = FilmicSpline.evaluate(spline.latitudeMax, spline)
+        let aboveShoulder = FilmicSpline.evaluate(spline.latitudeMax + epsilon, spline)
+        #expect(abs(belowShoulder - aboveShoulder) < 1e-3)
+    }
+
+    @Test func splineMapsBlackAndWhiteLogToTargetDisplayValues() {
+        let params = FilmicRGBParameters.darktableDefault
+        let spline = FilmicSpline.compute(params)
+
+        let blackDisplay = FilmicSpline.evaluate(0.0, spline)
+        let whiteDisplay = FilmicSpline.evaluate(1.0, spline)
+
+        let expectedBlack = pow(params.blackPointTarget / 100.0, 1.0 / params.outputPower)
+        let expectedWhite = pow(params.whitePointTarget / 100.0, 1.0 / params.outputPower)
+
+        #expect(abs(blackDisplay - expectedBlack) < 1e-3)
+        #expect(abs(whiteDisplay - expectedWhite) < 1e-3)
+    }
+
+    @Test func midSegmentSlopeMatchesContrast() {
+        let spline = FilmicSpline.compute(.darktableDefault)
+        let x0 = (spline.latitudeMin + spline.latitudeMax) / 2 - 0.001
+        let x1 = (spline.latitudeMin + spline.latitudeMax) / 2 + 0.001
+        let y0 = FilmicSpline.evaluate(x0, spline)
+        let y1 = FilmicSpline.evaluate(x1, spline)
+        let slope = (y1 - y0) / (x1 - x0)
+        #expect(abs(slope - spline.m2Mid) < 1e-2)
+    }
+
+    /// Cross-checks the spline fit against parameters this app didn't choose — decoded from a
+    /// real, darktable-authored edit (`~/Pictures/test/_MG_1633.CR2.xmp`, via
+    /// `dev-tools/decode_darktable_params.py`). Values transcribed from that decode (see
+    /// `dev-tools/README.md` for the full field dump and how it was verified). `spline_version`
+    /// and `shadows`/`highlights` in that file are V3/poly4, matching this port's scope exactly.
+    @Test func filmicSplineMatchesRealDarktableEditContinuity() {
+        let params = FilmicRGBParameters(
+            blackPointSource: -7.650000095367432,
+            whitePointSource: 4.559999942779511,
+            outputPower: 3.614816188812256,
+            latitude: 0.009999999776482582,
+            contrast: 1.0,
+            saturation: 0.0,
+            balance: 0.0
+        )
+        let spline = FilmicSpline.compute(params)
+        let epsilon = 1e-4
+
+        // Continuous at both latitude boundaries.
+        #expect(abs(
+            FilmicSpline.evaluate(spline.latitudeMin - epsilon, spline)
+                - FilmicSpline.evaluate(spline.latitudeMin, spline)
+        ) < 1e-3)
+        #expect(abs(
+            FilmicSpline.evaluate(spline.latitudeMax, spline)
+                - FilmicSpline.evaluate(spline.latitudeMax + epsilon, spline)
+        ) < 1e-3)
+
+        // Endpoints land on the real edit's actual target black/white display values.
+        let expectedBlack = pow(params.blackPointTarget / 100.0, 1.0 / params.outputPower)
+        let expectedWhite = pow(params.whitePointTarget / 100.0, 1.0 / params.outputPower)
+        #expect(abs(FilmicSpline.evaluate(0.0, spline) - expectedBlack) < 1e-3)
+        #expect(abs(FilmicSpline.evaluate(1.0, spline) - expectedWhite) < 1e-3)
+
+        // Monotonically increasing across [0,1] — the only domain real pixel data ever reaches,
+        // since `log_tonemapping_v2` always clamps to [0,1] before the spline is evaluated.
+        // (The fitted polynomials are not constrained to be monotonic if extrapolated outside
+        // that range — that's true of darktable's own math too, not a bug in this port.)
+        var previous = FilmicSpline.evaluate(0.0, spline)
+        for i in 1...120 {
+            let x = Double(i) / 120.0
+            let y = FilmicSpline.evaluate(x, spline)
+            #expect(y >= previous - 1e-6)
+            previous = y
+        }
+    }
+}
+
+@Suite("ColorBalanceRGB")
+struct ColorBalanceRGBTests {
+    @Test func defaultParametersAreIdentity() {
+        let derived = ColorBalanceRGBProcessor.compute(.darktableDefault)
+        let samples: [Triplet] = [
+            Triplet(x: 0.1845, y: 0.1845, z: 0.1845),
+            Triplet(x: 0.02, y: 0.05, z: 0.01),
+            Triplet(x: 0.8, y: 0.6, z: 0.4),
+            Triplet(x: 1.5, y: 1.2, z: 0.9),
+            Triplet(x: 0.001, y: 0.001, z: 0.001),
+        ]
+        for rgb in samples {
+            let out = ColorBalanceRGBProcessor.apply(rgb, derived)
+            #expect(abs(out.x - rgb.x) < 1e-4)
+            #expect(abs(out.y - rgb.y) < 1e-4)
+            #expect(abs(out.z - rgb.z) < 1e-4)
+        }
+    }
+
+    @Test func negativeInputIsClippedNotIdentity() {
+        let derived = ColorBalanceRGBProcessor.compute(.darktableDefault)
+        let out = ColorBalanceRGBProcessor.apply(Triplet(x: -0.1, y: 0.2, z: 0.2), derived)
+        #expect(out.x >= 0 && out.y >= 0 && out.z >= 0)
+    }
+
+    @Test func globalLiftMovesLuminanceInExpectedDirection() {
+        var params = ColorBalanceRGBParameters.darktableDefault
+        params.globalY = 0.2
+        let derived = ColorBalanceRGBProcessor.compute(params)
+        let grey = Triplet(x: 0.1845, y: 0.1845, z: 0.1845)
+        let out = ColorBalanceRGBProcessor.apply(grey, derived)
+        // A positive global luminance lift should brighten a mid-grey pixel.
+        #expect(out.x > grey.x && out.y > grey.y && out.z > grey.z)
+    }
+
+    @Test func positiveContrastSteepensAroundGreyFulcrum() {
+        var params = ColorBalanceRGBParameters.darktableDefault
+        params.contrast = 0.5
+        let derived = ColorBalanceRGBProcessor.compute(params)
+        let dark = ColorBalanceRGBProcessor.apply(Triplet(x: 0.05, y: 0.05, z: 0.05), derived)
+        let bright = ColorBalanceRGBProcessor.apply(Triplet(x: 0.5, y: 0.5, z: 0.5), derived)
+        // Positive contrast should push shadows darker and highlights brighter relative to input.
+        #expect(dark.x < 0.05)
+        #expect(bright.x > 0.5)
+    }
+
+    /// Cross-checks the wheel derivation against real, darktable-authored params — decoded from
+    /// `~/Pictures/test/_MG_1633.CR2.xmp` (`dev-tools/decode_darktable_params.py`). That edit's
+    /// wheels (Y/C/H) are all neutral (0), only chroma_global/saturation_global/fulcrums are
+    /// touched — saturation_global is part of the perceptual stage this port skips, so this
+    /// only exercises the linear chroma boost, not a full match to darktable's own output.
+    @Test func matchesRealDarktableEditForUnimplementedFieldsGracefully() {
+        let params = ColorBalanceRGBParameters(
+            shadowsWeight: 1.0,
+            whiteFulcrum: 0.0,
+            highlightsWeight: 1.0,
+            chromaGlobal: 0.09140002727508545,
+            hueAngle: 0.0,
+            maskGreyFulcrum: 0.18449999392032623,
+            vibrance: 0.0,
+            greyFulcrum: 0.18449999392032623,
+            contrast: 0.0
+        )
+        let derived = ColorBalanceRGBProcessor.compute(params)
+        let out = ColorBalanceRGBProcessor.apply(Triplet(x: 0.3, y: 0.2, z: 0.4), derived)
+        #expect(out.x.isFinite && out.y.isFinite && out.z.isFinite)
+        #expect(out.x >= 0 && out.y >= 0 && out.z >= 0)
+    }
 }

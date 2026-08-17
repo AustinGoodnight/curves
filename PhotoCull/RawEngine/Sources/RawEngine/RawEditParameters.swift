@@ -8,19 +8,30 @@ public struct RawEditParameters: Equatable, Sendable {
     public var neutralTemperature: Double?
     public var neutralTint: Double?
     public var sharpnessAmount: Double?
+    /// `nil` means "no filmic tone curve" — the Phase 2 passthrough behavior. Set to enable the
+    /// filmic RGB module (see `FilmicRGBParameters`).
+    public var filmicRGB: FilmicRGBParameters?
+    /// `nil` means "no color balance wheels". Applied after `filmicRGB` — darktable's default
+    /// scene-referred pipeline grades color on the already-tonemapped result (see
+    /// `ColorBalanceRGBParameters`).
+    public var colorBalanceRGB: ColorBalanceRGBParameters?
 
     public init(
         exposure: Double? = nil,
         boostAmount: Double? = nil,
         neutralTemperature: Double? = nil,
         neutralTint: Double? = nil,
-        sharpnessAmount: Double? = nil
+        sharpnessAmount: Double? = nil,
+        filmicRGB: FilmicRGBParameters? = nil,
+        colorBalanceRGB: ColorBalanceRGBParameters? = nil
     ) {
         self.exposure = exposure
         self.boostAmount = boostAmount
         self.neutralTemperature = neutralTemperature
         self.neutralTint = neutralTint
         self.sharpnessAmount = sharpnessAmount
+        self.filmicRGB = filmicRGB
+        self.colorBalanceRGB = colorBalanceRGB
     }
 
     public static let none = RawEditParameters()

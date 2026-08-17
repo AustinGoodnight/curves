@@ -31,6 +31,38 @@ public final class PhotoAsset {
     public var editNeutralTint: Double?
     public var editSharpnessAmount: Double?
 
+    /// Filmic RGB tone curve (Phase 3). `editFilmicEnabled` gates the whole module — when
+    /// false, RawEngine skips it entirely and rendering is identical to Phase 2. The individual
+    /// `nil` fields fall back to darktable's shipped defaults (see `FilmicRGBParameters`).
+    public var editFilmicEnabled: Bool = false
+    public var editFilmicWhitePointSource: Double?
+    public var editFilmicBlackPointSource: Double?
+    public var editFilmicContrast: Double?
+    public var editFilmicLatitude: Double?
+    public var editFilmicSaturation: Double?
+    public var editFilmicBalance: Double?
+
+    /// Color balance RGB — the 3-way (+global) color wheels (Phase 4). `editColorBalanceEnabled`
+    /// gates the whole module, same pattern as `editFilmicEnabled`. Each wheel is luminance (Y),
+    /// chroma (C), hue (H); `nil` falls back to darktable's neutral defaults (see
+    /// `ColorBalanceRGBParameters`).
+    public var editColorBalanceEnabled: Bool = false
+    public var editColorBalanceGlobalY: Double?
+    public var editColorBalanceGlobalC: Double?
+    public var editColorBalanceGlobalH: Double?
+    public var editColorBalanceShadowsY: Double?
+    public var editColorBalanceShadowsC: Double?
+    public var editColorBalanceShadowsH: Double?
+    public var editColorBalanceMidtonesY: Double?
+    public var editColorBalanceMidtonesC: Double?
+    public var editColorBalanceMidtonesH: Double?
+    public var editColorBalanceHighlightsY: Double?
+    public var editColorBalanceHighlightsC: Double?
+    public var editColorBalanceHighlightsH: Double?
+    public var editColorBalanceContrast: Double?
+    public var editColorBalanceVibrance: Double?
+    public var editColorBalanceChromaGlobal: Double?
+
     public var rating: Int {
         get { ratingRaw }
         set { ratingRaw = max(0, min(5, newValue)) }

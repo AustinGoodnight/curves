@@ -22,7 +22,44 @@ struct EditorView: View {
             boostAmount: asset.editBoostAmount,
             neutralTemperature: asset.editNeutralTemperature,
             neutralTint: asset.editNeutralTint,
-            sharpnessAmount: asset.editSharpnessAmount
+            sharpnessAmount: asset.editSharpnessAmount,
+            filmicRGB: filmicParams,
+            colorBalanceRGB: colorBalanceParams
+        )
+    }
+
+    private var filmicParams: FilmicRGBParameters? {
+        guard asset.editFilmicEnabled else { return nil }
+        let d = FilmicRGBParameters.darktableDefault
+        return FilmicRGBParameters(
+            blackPointSource: asset.editFilmicBlackPointSource ?? d.blackPointSource,
+            whitePointSource: asset.editFilmicWhitePointSource ?? d.whitePointSource,
+            latitude: asset.editFilmicLatitude ?? d.latitude,
+            contrast: asset.editFilmicContrast ?? d.contrast,
+            saturation: asset.editFilmicSaturation ?? d.saturation,
+            balance: asset.editFilmicBalance ?? d.balance
+        )
+    }
+
+    private var colorBalanceParams: ColorBalanceRGBParameters? {
+        guard asset.editColorBalanceEnabled else { return nil }
+        let d = ColorBalanceRGBParameters.darktableDefault
+        return ColorBalanceRGBParameters(
+            shadowsY: asset.editColorBalanceShadowsY ?? d.shadowsY,
+            shadowsC: asset.editColorBalanceShadowsC ?? d.shadowsC,
+            shadowsH: asset.editColorBalanceShadowsH ?? d.shadowsH,
+            midtonesY: asset.editColorBalanceMidtonesY ?? d.midtonesY,
+            midtonesC: asset.editColorBalanceMidtonesC ?? d.midtonesC,
+            midtonesH: asset.editColorBalanceMidtonesH ?? d.midtonesH,
+            highlightsY: asset.editColorBalanceHighlightsY ?? d.highlightsY,
+            highlightsC: asset.editColorBalanceHighlightsC ?? d.highlightsC,
+            highlightsH: asset.editColorBalanceHighlightsH ?? d.highlightsH,
+            globalY: asset.editColorBalanceGlobalY ?? d.globalY,
+            globalC: asset.editColorBalanceGlobalC ?? d.globalC,
+            globalH: asset.editColorBalanceGlobalH ?? d.globalH,
+            chromaGlobal: asset.editColorBalanceChromaGlobal ?? d.chromaGlobal,
+            vibrance: asset.editColorBalanceVibrance ?? d.vibrance,
+            contrast: asset.editColorBalanceContrast ?? d.contrast
         )
     }
 
@@ -73,6 +110,75 @@ struct EditorView: View {
                         )
                     }
                 }
+                Section("Filmic RGB") {
+                    Toggle("Enable", isOn: Binding(
+                        get: { asset.editFilmicEnabled },
+                        set: { asset.editFilmicEnabled = $0; scheduleRender() }
+                    ))
+                    if asset.editFilmicEnabled {
+                        let d = FilmicRGBParameters.darktableDefault
+                        slider(
+                            "White EV", value: bind(\.editFilmicWhitePointSource, fallback: d.whitePointSource),
+                            range: 2...8
+                        )
+                        slider(
+                            "Black EV", value: bind(\.editFilmicBlackPointSource, fallback: d.blackPointSource),
+                            range: -14 ... -2
+                        )
+                        slider(
+                            "Contrast", value: bind(\.editFilmicContrast, fallback: d.contrast),
+                            range: 0.5...2
+                        )
+                        slider(
+                            "Latitude", value: bind(\.editFilmicLatitude, fallback: d.latitude),
+                            range: 0.01...80
+                        )
+                        slider(
+                            "Saturation", value: bind(\.editFilmicSaturation, fallback: d.saturation),
+                            range: -100...100
+                        )
+                        slider(
+                            "Balance", value: bind(\.editFilmicBalance, fallback: d.balance),
+                            range: -50...50
+                        )
+                    }
+                }
+                Section("Color Balance RGB") {
+                    Toggle("Enable", isOn: Binding(
+                        get: { asset.editColorBalanceEnabled },
+                        set: { asset.editColorBalanceEnabled = $0; scheduleRender() }
+                    ))
+                    if asset.editColorBalanceEnabled {
+                        wheel(
+                            "Global",
+                            y: \.editColorBalanceGlobalY, c: \.editColorBalanceGlobalC, h: \.editColorBalanceGlobalH
+                        )
+                        wheel(
+                            "Shadows",
+                            y: \.editColorBalanceShadowsY, c: \.editColorBalanceShadowsC, h: \.editColorBalanceShadowsH
+                        )
+                        wheel(
+                            "Midtones",
+                            y: \.editColorBalanceMidtonesY, c: \.editColorBalanceMidtonesC, h: \.editColorBalanceMidtonesH
+                        )
+                        wheel(
+                            "Highlights",
+                            y: \.editColorBalanceHighlightsY, c: \.editColorBalanceHighlightsC, h: \.editColorBalanceHighlightsH
+                        )
+                        slider(
+                            "Chroma", value: bind(\.editColorBalanceChromaGlobal, fallback: 0),
+                            range: -1...1
+                        )
+                        slider(
+                            "Vibrance", value: bind(\.editColorBalanceVibrance, fallback: 0),
+                            range: -1...1
+                        )
+                        slider(
+                            "Contrast", value: bind(\.editColorBalanceContrast, fallback: 0),
+                            range: -1...1
+                        )
+                    }
+                }
                 Section {
                     Button("Reset All") { resetAll() }
                         .disabled(!hasEdits)
@@ -109,7 +215,8 @@ struct EditorView: View {
     private var hasEdits: Bool {
         asset.editExposure != nil || asset.editBoostAmount != nil
             || asset.editNeutralTemperature != nil || asset.editNeutralTint != nil
-            || asset.editSharpnessAmount != nil
+            || asset.editSharpnessAmount != nil || asset.editFilmicEnabled
+            || asset.editColorBalanceEnabled
     }
 
     private func bind(_ keyPath: ReferenceWritableKeyPath<PhotoAsset, Double?>, fallback: Double) -> Binding<Double> {
@@ -120,6 +227,22 @@ struct EditorView: View {
                 scheduleRender()
             }
         )
+    }
+
+    @ViewBuilder
+    private func wheel(
+        _ title: String,
+        y: ReferenceWritableKeyPath<PhotoAsset, Double?>,
+        c: ReferenceWritableKeyPath<PhotoAsset, Double?>,
+        h: ReferenceWritableKeyPath<PhotoAsset, Double?>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            slider("Luminance", value: bind(y, fallback: 0), range: -1...1)
+            slider("Chroma", value: bind(c, fallback: 0), range: 0...1)
+            slider("Hue", value: bind(h, fallback: 0), range: 0...360)
+        }
+        .padding(.vertical, 2)
     }
 
     private func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
@@ -167,6 +290,29 @@ struct EditorView: View {
         asset.editNeutralTemperature = nil
         asset.editNeutralTint = nil
         asset.editSharpnessAmount = nil
+        asset.editFilmicEnabled = false
+        asset.editFilmicWhitePointSource = nil
+        asset.editFilmicBlackPointSource = nil
+        asset.editFilmicContrast = nil
+        asset.editFilmicLatitude = nil
+        asset.editFilmicSaturation = nil
+        asset.editFilmicBalance = nil
+        asset.editColorBalanceEnabled = false
+        asset.editColorBalanceGlobalY = nil
+        asset.editColorBalanceGlobalC = nil
+        asset.editColorBalanceGlobalH = nil
+        asset.editColorBalanceShadowsY = nil
+        asset.editColorBalanceShadowsC = nil
+        asset.editColorBalanceShadowsH = nil
+        asset.editColorBalanceMidtonesY = nil
+        asset.editColorBalanceMidtonesC = nil
+        asset.editColorBalanceMidtonesH = nil
+        asset.editColorBalanceHighlightsY = nil
+        asset.editColorBalanceHighlightsC = nil
+        asset.editColorBalanceHighlightsH = nil
+        asset.editColorBalanceContrast = nil
+        asset.editColorBalanceVibrance = nil
+        asset.editColorBalanceChromaGlobal = nil
         scheduleRender()
     }
 

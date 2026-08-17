@@ -58,7 +58,13 @@ public final class RawImageRenderer {
     public func renderPreview(params: RawEditParameters, maxPixelSize: CGFloat) -> CGImage? {
         guard let filter else { return nil }
         apply(params)
-        guard let output = filter.outputImage else { return nil }
+        guard var output = filter.outputImage else { return nil }
+        if let filmicRGB = params.filmicRGB {
+            output = FilmicRGBKernel.apply(to: output, params: filmicRGB)
+        }
+        if let colorBalanceRGB = params.colorBalanceRGB {
+            output = ColorBalanceRGBKernel.apply(to: output, params: colorBalanceRGB)
+        }
         let extent = output.extent
         let longestSide = max(extent.width, extent.height)
         let scale = longestSide > maxPixelSize ? maxPixelSize / longestSide : 1
@@ -70,7 +76,13 @@ public final class RawImageRenderer {
     public func renderFullResolution(params: RawEditParameters) -> CGImage? {
         guard let filter else { return nil }
         apply(params)
-        guard let output = filter.outputImage else { return nil }
+        guard var output = filter.outputImage else { return nil }
+        if let filmicRGB = params.filmicRGB {
+            output = FilmicRGBKernel.apply(to: output, params: filmicRGB)
+        }
+        if let colorBalanceRGB = params.colorBalanceRGB {
+            output = ColorBalanceRGBKernel.apply(to: output, params: colorBalanceRGB)
+        }
         return context.createCGImage(output, from: output.extent)
     }
 }
