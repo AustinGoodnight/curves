@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var newSceneName = ""
     @State private var addSelectionToNewScene = false
     @State private var refreshTrigger = 0
+    @State private var editingAsset: PhotoAsset?
 
     enum SortOption: String, CaseIterable, Identifiable {
         case captureDateDesc = "Newest First"
@@ -65,11 +66,16 @@ struct ContentView: View {
                     assets: filteredAssets,
                     selection: $selection,
                     onGroupStack: groupSelectedIntoStack,
-                    onUnstack: unstackSelected
+                    onUnstack: unstackSelected,
+                    onOpenEditor: { editingAsset = $0 }
                 )
                 .id(refreshTrigger)
                 .navigationTitle(selectedScene?.name ?? "PhotoCull")
                 .toolbar { toolbarContent }
+                .sheet(item: $editingAsset) { asset in
+                    EditorView(asset: asset)
+                        .frame(minWidth: 900, minHeight: 600)
+                }
                 .overlay {
                     if allAssets.isEmpty {
                         ContentUnavailableView(
@@ -112,6 +118,16 @@ struct ContentView: View {
             } label: {
                 Label("Import Folder", systemImage: "folder.badge.plus")
             }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                if let id = selection.first, let asset = allAssets.first(where: { $0.id == id }) {
+                    editingAsset = asset
+                }
+            } label: {
+                Label("Edit…", systemImage: "slider.horizontal.3")
+            }
+            .disabled(selection.count != 1)
         }
         ToolbarItem(placement: .primaryAction) {
             Menu {

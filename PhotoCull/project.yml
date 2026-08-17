@@ -7,6 +7,8 @@ options:
 packages:
   PhotoCatalog:
     path: PhotoCatalog
+  RawEngine:
+    path: RawEngine
 targets:
   PhotoCull:
     type: application
@@ -16,6 +18,7 @@ targets:
       - PhotoCull
     dependencies:
       - package: PhotoCatalog
+      - package: RawEngine
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.austingoodnight.PhotoCull

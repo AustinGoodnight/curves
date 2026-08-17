@@ -21,6 +21,7 @@ struct CullingGridView: View {
     @Binding var selection: Set<UUID>
     var onGroupStack: () -> Void = {}
     var onUnstack: () -> Void = {}
+    var onOpenEditor: (PhotoAsset) -> Void = { _ in }
 
     @State private var expandedStacks: Set<UUID> = []
     @State private var lastClickedID: UUID?
@@ -110,6 +111,7 @@ struct CullingGridView: View {
         case .single(let asset):
             PhotoThumbnailCell(asset: asset, isSelected: selection.contains(asset.id))
                 .id(asset.id)
+                .onTapGesture(count: 2) { onOpenEditor(asset) }
                 .onTapGesture { handleClick(asset.id) }
         case .stackCover(let stack, let cover, let count):
             PhotoThumbnailCell(
@@ -119,6 +121,7 @@ struct CullingGridView: View {
                 onToggleStack: { expandedStacks.insert(stack.id) }
             )
             .id(cover.id)
+            .onTapGesture(count: 2) { onOpenEditor(cover) }
             .onTapGesture { handleClick(cover.id) }
         case .stackMember(let asset, let position, let total):
             PhotoThumbnailCell(
@@ -128,6 +131,7 @@ struct CullingGridView: View {
                 onToggleStack: position == 1 ? { collapseStack(containing: asset) } : nil
             )
             .id(asset.id)
+            .onTapGesture(count: 2) { onOpenEditor(asset) }
             .onTapGesture { handleClick(asset.id) }
         }
     }
@@ -198,6 +202,11 @@ struct CullingGridView: View {
             return .handled
         case .downArrow:
             moveFocus(to: currentIndex + columnCount, order: order, extend: extend)
+            return .handled
+        case .return:
+            if let id = anchorID, let asset = assets.first(where: { $0.id == id }) {
+                onOpenEditor(asset)
+            }
             return .handled
         default:
             break

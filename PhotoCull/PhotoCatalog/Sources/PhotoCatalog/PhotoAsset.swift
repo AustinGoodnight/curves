@@ -22,6 +22,15 @@ public final class PhotoAsset {
     @Relationship(deleteRule: .nullify, inverse: \PhotoScene.photos)
     public var scenes: [PhotoScene]? = []
 
+    /// Edit parameters for `RawEngine`'s `CIRAWFilter` pipeline. `nil` means "use this image's
+    /// as-shot/vendor default" — not zero — so an unedited photo renders exactly as the camera
+    /// intended until the user actually touches a slider.
+    public var editExposure: Double?
+    public var editBoostAmount: Double?
+    public var editNeutralTemperature: Double?
+    public var editNeutralTint: Double?
+    public var editSharpnessAmount: Double?
+
     public var rating: Int {
         get { ratingRaw }
         set { ratingRaw = max(0, min(5, newValue)) }
