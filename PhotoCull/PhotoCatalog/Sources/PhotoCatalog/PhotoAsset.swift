@@ -19,6 +19,9 @@ public final class PhotoAsset {
 
     public var stack: PhotoStack?
 
+    @Relationship(deleteRule: .nullify, inverse: \PhotoScene.photos)
+    public var scenes: [PhotoScene]? = []
+
     public var rating: Int {
         get { ratingRaw }
         set { ratingRaw = max(0, min(5, newValue)) }

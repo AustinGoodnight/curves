@@ -1,9 +1,16 @@
 import SwiftUI
 import PhotoCatalog
 
+enum StackBadge {
+    case collapsed(count: Int)
+    case expandedMember(position: Int, total: Int)
+}
+
 struct PhotoThumbnailCell: View {
     @Bindable var asset: PhotoAsset
     let isSelected: Bool
+    var stackBadge: StackBadge? = nil
+    var onToggleStack: (() -> Void)? = nil
 
     @State private var thumbnail: CGImage?
 
@@ -32,6 +39,7 @@ struct PhotoThumbnailCell: View {
             )
             .overlay(alignment: .topTrailing) { flagBadge }
             .overlay(alignment: .topLeading) { colorDot }
+            .overlay(alignment: .bottomLeading) { stackBadgeView }
 
             HStack(spacing: 2) {
                 ForEach(1...5, id: \.self) { star in
@@ -77,6 +85,41 @@ struct PhotoThumbnailCell: View {
                 .fill(color(for: asset.colorLabel))
                 .frame(width: 10, height: 10)
                 .padding(6)
+        }
+    }
+
+    @ViewBuilder private var stackBadgeView: some View {
+        switch stackBadge {
+        case .collapsed(let count):
+            Button(action: { onToggleStack?() }) {
+                HStack(spacing: 3) {
+                    Image(systemName: "square.stack")
+                    Text("\(count)")
+                }
+            }
+            .buttonStyle(.plain)
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(.thinMaterial, in: Capsule())
+            .padding(4)
+        case .expandedMember(let position, let total):
+            HStack(spacing: 3) {
+                if position == 1 {
+                    Button(action: { onToggleStack?() }) {
+                        Image(systemName: "chevron.down.square.fill")
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text("\(position)/\(total)")
+            }
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(.thinMaterial, in: Capsule())
+            .padding(4)
+        case nil:
+            EmptyView()
         }
     }
 
