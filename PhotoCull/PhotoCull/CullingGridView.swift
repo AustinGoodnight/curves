@@ -19,6 +19,12 @@ private enum DisplayItem: Identifiable {
 struct CullingGridView: View {
     let assets: [PhotoAsset]
     @Binding var selection: Set<UUID>
+    /// "Sessions" mode (`false`): a click only selects — multi-select for rating/flagging/
+    /// stacking/scene-assigning stays available, opening a photo needs the hover-revealed edit
+    /// button or Return. "Edit" mode (`true`): a click selects *and* immediately opens the editor
+    /// — the tradeoff is you give up multi-select in this mode in exchange for one click per photo
+    /// to jump straight into editing; switch back to Sessions mode for anything selection-based.
+    var isEditMode: Bool = false
     var onGroupStack: () -> Void = {}
     var onUnstack: () -> Void = {}
     var onOpenEditor: (PhotoAsset) -> Void = { _ in }
@@ -35,6 +41,10 @@ struct CullingGridView: View {
         Array(repeating: GridItem(.flexible(), spacing: spacing), count: max(columnCount, 1))
     }
 
+    /// ⚠️ Rebuilds the *entire* grid's worth of items from scratch on every access (O(n), with an
+    /// O(n) inner scan per stack) — see `CLAUDE.md` incident #4. Never call this more than once
+    /// per `body` evaluation, and never from a function that runs per-cell (`cell(for:at:in:)` and
+    /// friends take an already-computed `items` array as a parameter for exactly this reason).
     private var displayItems: [DisplayItem] {
         var seenStacks = Set<UUID>()
         var items: [DisplayItem] = []
@@ -72,12 +82,22 @@ struct CullingGridView: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
+        // Computed once per body pass and threaded through explicitly (`cell(for:at:in:)`,
+        // `sceneBorderInfo`, `currentScene`) rather than left as repeated reads of the
+        // `displayItems` computed property — `displayItems` rebuilds the *entire* list (1000s of
+        // items, with an O(n) inner scan per stack) from scratch on every access. Building the
+        // scene border for one cell used to call `currentScene(at:)` up to 5 times (self + 4
+        // neighbors), each of which read `displayItems` twice (`.indices.contains` and the
+        // subscript) — roughly 10 full rebuilds *per visible cell*, for every visible cell, on
+        // every render. That's the exact "computed property read too many times" trap from
+        // `CLAUDE.md`, just newly reintroduced here instead of in `ContentView`.
+        let items = displayItems
+        return GeometryReader { geo in
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVGrid(columns: gridColumns, spacing: spacing) {
-                        ForEach(displayItems) { item in
-                            cell(for: item)
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                            cell(for: item, at: index, in: items)
                         }
                     }
                     .padding(spacing)
@@ -106,35 +126,87 @@ struct CullingGridView: View {
         .onKeyPress(action: handleKeyPress)
     }
 
+    /// Which scene (if any) the item at `index` belongs to — used both directly and to compare a
+    /// cell against its grid neighbors when building `sceneBorderInfo(at:in:)`. Takes the already-
+    /// computed `items` array rather than reading `displayItems` itself — see `body`'s comment for
+    /// why re-deriving it here would be catastrophically expensive.
+    private func currentScene(at index: Int, in items: [DisplayItem]) -> PhotoScene? {
+        guard items.indices.contains(index) else { return nil }
+        switch items[index] {
+        case .single(let asset): return asset.scene
+        case .stackCover(_, let cover, _): return cover.scene
+        case .stackMember(let asset, _, _): return asset.scene
+        }
+    }
+
+    /// Builds the per-edge merge state a contiguous block of same-scene cells needs to read as
+    /// one wrapping outline rather than N individual rings — see `SceneBorderInfo`'s doc comment
+    /// for how `PhotoThumbnailCell` turns this into an actual seamless shape. An edge is "merged"
+    /// (no stroke, extends into the gutter instead) only when the neighbor in that direction is a
+    /// *different* display item in the same scene; the grid's own boundary (first/last column,
+    /// first/last item) always counts as a boundary edge. The scene's name is attached only to the
+    /// group's top-right corner cell (`!topMerged && !trailingMerged`) so it's shown once per
+    /// group, "inside the border" near its top-right — not once per photo.
+    private func sceneBorderInfo(at index: Int, in items: [DisplayItem]) -> SceneBorderInfo? {
+        guard let scene = currentScene(at: index, in: items) else { return nil }
+        let col = index % max(columnCount, 1)
+        let leadingMerged = col > 0 && currentScene(at: index - 1, in: items)?.id == scene.id
+        let trailingMerged = col < columnCount - 1 && index + 1 < items.count && currentScene(at: index + 1, in: items)?.id == scene.id
+        let topMerged = index - columnCount >= 0 && currentScene(at: index - columnCount, in: items)?.id == scene.id
+        let bottomMerged = index + columnCount < items.count && currentScene(at: index + columnCount, in: items)?.id == scene.id
+        return SceneBorderInfo(
+            color: sceneBorderColor(for: scene),
+            name: (!topMerged && !trailingMerged) ? scene.name : nil,
+            topMerged: topMerged, bottomMerged: bottomMerged,
+            leadingMerged: leadingMerged, trailingMerged: trailingMerged
+        )
+    }
+
+    /// In Sessions mode a click only selects — opening a photo is the hover-revealed edit button
+    /// (`PhotoThumbnailCell.onOpenEditor`) or Return. In Edit mode a click also opens the editor
+    /// immediately. Either way this is exactly one tap gesture per cell, never a single-tap
+    /// stacked alongside a `.onTapGesture(count: 2)` on the same view — two exclusive tap-count
+    /// recognizers on one view forces SwiftUI to hold the single-click action until the double-
+    /// click disambiguation window expires, which is what made every click feel laggy before.
     @ViewBuilder
-    private func cell(for item: DisplayItem) -> some View {
+    private func cell(for item: DisplayItem, at index: Int, in items: [DisplayItem]) -> some View {
+        let sceneBorder = sceneBorderInfo(at: index, in: items)
         switch item {
         case .single(let asset):
-            PhotoThumbnailCell(asset: asset, isSelected: selection.contains(asset.id))
-                .id(asset.id)
-                .onTapGesture(count: 2) { onOpenEditor(asset) }
-                .onTapGesture { handleClick(asset.id) }
+            PhotoThumbnailCell(
+                asset: asset, isSelected: selection.contains(asset.id), sceneBorder: sceneBorder,
+                onOpenEditor: { onOpenEditor(asset) }
+            )
+            .id(asset.id)
+            .onTapGesture { tap(asset.id, open: asset) }
         case .stackCover(let stack, let cover, let count):
             PhotoThumbnailCell(
                 asset: cover,
                 isSelected: selection.contains(cover.id),
                 stackBadge: .collapsed(count: count),
-                onToggleStack: { expandedStacks.insert(stack.id) }
+                onToggleStack: { expandedStacks.insert(stack.id) },
+                sceneBorder: sceneBorder,
+                onOpenEditor: { onOpenEditor(cover) }
             )
             .id(cover.id)
-            .onTapGesture(count: 2) { onOpenEditor(cover) }
-            .onTapGesture { handleClick(cover.id) }
+            .onTapGesture { tap(cover.id, open: cover) }
         case .stackMember(let asset, let position, let total):
             PhotoThumbnailCell(
                 asset: asset,
                 isSelected: selection.contains(asset.id),
                 stackBadge: .expandedMember(position: position, total: total),
-                onToggleStack: position == 1 ? { collapseStack(containing: asset) } : nil
+                onToggleStack: position == 1 ? { collapseStack(containing: asset) } : nil,
+                sceneBorder: sceneBorder,
+                onOpenEditor: { onOpenEditor(asset) }
             )
             .id(asset.id)
-            .onTapGesture(count: 2) { onOpenEditor(asset) }
-            .onTapGesture { handleClick(asset.id) }
+            .onTapGesture { tap(asset.id, open: asset) }
         }
+    }
+
+    private func tap(_ id: UUID, open asset: PhotoAsset) {
+        handleClick(id)
+        if isEditMode { onOpenEditor(asset) }
     }
 
     private func collapseStack(containing asset: PhotoAsset) {
@@ -230,7 +302,7 @@ struct CullingGridView: View {
                 for asset in targets { asset.flag = .pick }
             }
             return .handled
-        case "x":
+        case "r":
             if targets.count == 1, let only = targets.first {
                 only.flag = only.flag == .reject ? .none : .reject
             } else {

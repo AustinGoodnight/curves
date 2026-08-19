@@ -18,71 +18,39 @@ public final class PhotoAsset {
     public var colorLabelRaw: Int = ColorLabel.none.rawValue
 
     public var stack: PhotoStack?
+    public var scene: PhotoScene?
+    public var session: Session?
 
-    @Relationship(deleteRule: .nullify, inverse: \PhotoScene.photos)
-    public var scenes: [PhotoScene]? = []
-
-    /// Edit parameters for `RawEngine`'s `CIRAWFilter` pipeline. `nil` means "use this image's
-    /// as-shot/vendor default" — not zero — so an unedited photo renders exactly as the camera
-    /// intended until the user actually touches a slider.
+    /// Base edit parameters for `RawEngine`'s `CIRAWFilter` pipeline. `nil` means "use this
+    /// image's as-shot/vendor default" — not zero — so an unedited photo renders exactly as the
+    /// camera intended until the user actually touches a slider. Unlike the four kernel-module
+    /// parameter groups (Filmic RGB, Color Balance RGB, RGB Curve, Color Zones — now on `Stage`),
+    /// these stay directly on `PhotoAsset`: `CIRAWFilter` applies them once during RAW decode,
+    /// before any stage's kernel passes run, so there's no "per stage" version of these to stack.
     public var editExposure: Double?
     public var editBoostAmount: Double?
     public var editNeutralTemperature: Double?
     public var editNeutralTint: Double?
     public var editSharpnessAmount: Double?
 
-    /// Filmic RGB tone curve (Phase 3). Unlike Color Balance RGB / RGB Curve, darktable's
-    /// default Filmic curve is *not* a no-op — it actively remaps tone, which is the point of
-    /// the module — so this one keeps a real bypass switch (default on, matching the "most of
-    /// the time I leave it at default" usage the toggle was added for). The individual `nil`
-    /// fields fall back to darktable's shipped defaults (see `FilmicRGBParameters`).
-    public var editFilmicEnabled: Bool = true
-    public var editFilmicWhitePointSource: Double?
-    public var editFilmicBlackPointSource: Double?
-    public var editFilmicContrast: Double?
-    public var editFilmicLatitude: Double?
-    public var editFilmicSaturation: Double?
-    public var editFilmicBalance: Double?
+    /// Owns this photo's `.single` stage (always present, index 0) and any `.custom` stages the
+    /// user has added. The shared `.scene` stage lives on `PhotoScene` instead — see `Stage`'s
+    /// doc comment.
+    @Relationship(deleteRule: .cascade, inverse: \Stage.asset)
+    public var stages: [Stage]? = []
 
-    /// Color balance RGB — the 3-way (+global) color wheels (Phase 4). Bypass switch, same
-    /// purpose as `editFilmicEnabled`: skips the module's `CIColorKernel` pass entirely when off,
-    /// rather than running it at its (numerically no-op) defaults. Each wheel is luminance (Y),
-    /// chroma (C), hue (H); `nil` falls back to darktable's neutral defaults (see
-    /// `ColorBalanceRGBParameters`).
-    public var editColorBalanceEnabled: Bool = true
-    public var editColorBalanceGlobalY: Double?
-    public var editColorBalanceGlobalC: Double?
-    public var editColorBalanceGlobalH: Double?
-    public var editColorBalanceShadowsY: Double?
-    public var editColorBalanceShadowsC: Double?
-    public var editColorBalanceShadowsH: Double?
-    public var editColorBalanceMidtonesY: Double?
-    public var editColorBalanceMidtonesC: Double?
-    public var editColorBalanceMidtonesH: Double?
-    public var editColorBalanceHighlightsY: Double?
-    public var editColorBalanceHighlightsC: Double?
-    public var editColorBalanceHighlightsH: Double?
-    public var editColorBalanceContrast: Double?
-    public var editColorBalanceVibrance: Double?
-    public var editColorBalanceChromaGlobal: Double?
+    /// The always-present, per-photo stage — created alongside this asset in `init` and never
+    /// deleted or renamed. The `??` fallback only matters for assets that predate the `Stage`
+    /// model and haven't been migrated yet; it deliberately returns a transient, unpersisted
+    /// `Stage` rather than crashing.
+    public var singleStage: Stage {
+        stages?.first(where: { $0.kind == .single }) ?? Stage(kind: .single, name: "Single", asset: self)
+    }
 
-    /// RGB tone curve. Bypass switch, same purpose as `editFilmicEnabled`. Points are stored
-    /// flat-interleaved (`[x0, y0, x1, y1, ...]`, sorted by x) rather than as `[CGPoint]`/a custom
-    /// struct array — SwiftData round-trips `[Double]` natively without needing a
-    /// `Codable`/`Transformable` attribute. `nil`/fewer-than-2-points falls back to
-    /// `RGBCurveParameters.identityPoints` (see `RGBCurveParameters`).
-    public var editRGBCurveEnabled: Bool = true
-    public var editRGBCurvePoints: [Double]?
-    /// `nil` falls back to darktable's default (luminance-preserving).
-    public var editRGBCurvePreserveColors: Bool?
-
-    /// Color zones EQ — lightness/chroma/hue vs. hue. Bypass switch, same purpose as
-    /// `editFilmicEnabled`; all 3 curves default to a flat no-op (see `ColorZonesParameters`).
-    /// Same flat-interleaved storage convention as `editRGBCurvePoints`.
-    public var editColorZonesEnabled: Bool = true
-    public var editColorZonesLightnessPoints: [Double]?
-    public var editColorZonesChromaPoints: [Double]?
-    public var editColorZonesHuePoints: [Double]?
+    /// User-added stages, in display/composite order.
+    public var customStages: [Stage] {
+        (stages ?? []).filter { $0.kind == .custom }.sorted { $0.sortIndex < $1.sortIndex }
+    }
 
     public var rating: Int {
         get { ratingRaw }
@@ -104,6 +72,7 @@ public final class PhotoAsset {
         bookmarkData: Data? = nil,
         fileName: String,
         fileExtension: String,
+        session: Session,
         importDate: Date = Date(),
         captureDate: Date? = nil,
         fileSize: Int64 = 0,
@@ -115,6 +84,7 @@ public final class PhotoAsset {
         self.bookmarkData = bookmarkData
         self.fileName = fileName
         self.fileExtension = fileExtension
+        self.session = session
         self.importDate = importDate
         self.captureDate = captureDate
         self.fileSize = fileSize
@@ -123,6 +93,7 @@ public final class PhotoAsset {
         self.ratingRaw = 0
         self.flagRaw = FlagState.none.rawValue
         self.colorLabelRaw = ColorLabel.none.rawValue
+        self.stages = [Stage(kind: .single, name: "Single", asset: self)]
     }
 
     /// Bookmarks survive file moves/renames within the same volume; the raw path is the

@@ -24,11 +24,12 @@ public final class LibraryImporter {
         return results
     }
 
-    /// Skips files already present in the catalog (matched by absolute path) and returns
-    /// the count of newly registered assets.
+    /// Skips files already present *in this session* (matched by absolute path) and returns the
+    /// count of newly registered assets. Dedup is session-scoped, not global: the same absolute
+    /// path imported into a different session is treated as a new, separate `PhotoAsset`.
     @discardableResult
-    public func importFiles(_ urls: [URL], into context: ModelContext) throws -> Int {
-        let existingPaths = Set(try context.fetch(FetchDescriptor<PhotoAsset>()).map(\.filePath))
+    public func importFiles(_ urls: [URL], into context: ModelContext, session: Session) throws -> Int {
+        let existingPaths = Set((session.photos ?? []).map(\.filePath))
 
         var importedCount = 0
         for url in urls {
@@ -46,6 +47,7 @@ public final class LibraryImporter {
                 bookmarkData: bookmark,
                 fileName: url.lastPathComponent,
                 fileExtension: url.pathExtension.lowercased(),
+                session: session,
                 captureDate: captureDate,
                 fileSize: fileSize,
                 pixelWidth: dimensions.width,

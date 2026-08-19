@@ -2,42 +2,62 @@ import SwiftUI
 import PhotoCatalog
 
 struct SidebarView: View {
+    let sessions: [Session]
     let scenes: [PhotoScene]
+    @Binding var selectedSession: Session?
     @Binding var selectedScene: PhotoScene?
-    var onNewScene: () -> Void
+    var onNewScene: (Session) -> Void
     var onDeleteScene: (PhotoScene) -> Void
 
     var body: some View {
         List {
             Section("Library") {
-                row(title: "All Photos", systemImage: "photo.on.rectangle", isSelected: selectedScene == nil) {
+                row(
+                    title: "All Photos", systemImage: "photo.on.rectangle",
+                    isSelected: selectedScene == nil && selectedSession == nil
+                ) {
                     selectedScene = nil
+                    selectedSession = nil
                 }
             }
-            Section("Scenes") {
-                ForEach(scenes) { scene in
-                    row(title: scene.name, systemImage: "rectangle.stack", isSelected: selectedScene?.id == scene.id) {
-                        selectedScene = scene
+            ForEach(sessions) { session in
+                Section(session.name) {
+                    row(
+                        title: "All in Session", systemImage: "calendar",
+                        isSelected: selectedScene == nil && selectedSession?.id == session.id
+                    ) {
+                        selectedScene = nil
+                        selectedSession = session
                     }
-                    .contextMenu {
-                        Button("Delete Scene", role: .destructive) {
-                            onDeleteScene(scene)
+                    ForEach(scenesFor(session)) { scene in
+                        row(title: scene.name, systemImage: "rectangle.stack", isSelected: selectedScene?.id == scene.id) {
+                            selectedSession = session
+                            selectedScene = scene
+                        }
+                        .contextMenu {
+                            Button("Delete Scene", role: .destructive) {
+                                onDeleteScene(scene)
+                            }
                         }
                     }
+                    Button {
+                        onNewScene(session)
+                    } label: {
+                        Label("New Scene…", systemImage: "plus.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                 }
-                Button {
-                    onNewScene()
-                } label: {
-                    Label("New Scene…", systemImage: "plus.circle")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
             }
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
         .background(Color.sidebarBackground)
-        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+        .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 300)
+    }
+
+    private func scenesFor(_ session: Session) -> [PhotoScene] {
+        scenes.filter { $0.session?.id == session.id }
     }
 
     private func row(title: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) -> some View {

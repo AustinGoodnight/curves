@@ -22,7 +22,7 @@ struct RawEngineTests {
         guard let url = Self.testFileURL else { return }
         let renderer = RawImageRenderer()
         #expect(renderer.load(url: url))
-        let image = renderer.renderPreview(params: .none, maxPixelSize: 400)
+        let image = renderer.renderPreview(baseParams: .none, stageStack: [], maxPixelSize: 400)
         let cgImage = try #require(image)
         #expect(max(cgImage.width, cgImage.height) <= 400)
     }
@@ -31,8 +31,8 @@ struct RawEngineTests {
         guard let url = Self.testFileURL else { return }
         let renderer = RawImageRenderer()
         #expect(renderer.load(url: url))
-        let dark = renderer.renderPreview(params: RawEditParameters(exposure: -2), maxPixelSize: 200)
-        let bright = renderer.renderPreview(params: RawEditParameters(exposure: 2), maxPixelSize: 200)
+        let dark = renderer.renderPreview(baseParams: RawBaseParameters(exposure: -2), stageStack: [], maxPixelSize: 200)
+        let bright = renderer.renderPreview(baseParams: RawBaseParameters(exposure: 2), stageStack: [], maxPixelSize: 200)
         let darkData = try #require(dark?.dataProvider?.data)
         let brightData = try #require(bright?.dataProvider?.data)
         #expect(darkData != brightData)
@@ -44,7 +44,7 @@ struct RawEngineTests {
         #expect(renderer.load(url: url))
         let outURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
         defer { try? FileManager.default.removeItem(at: outURL) }
-        try ExportPipeline.export(renderer: renderer, params: .none, format: .jpeg(quality: 0.8), to: outURL)
+        try ExportPipeline.export(renderer: renderer, baseParams: .none, stageStack: [], format: .jpeg(quality: 0.8), to: outURL)
         let attrs = try FileManager.default.attributesOfItem(atPath: outURL.path)
         #expect((attrs[.size] as? Int ?? 0) > 0)
     }
@@ -53,9 +53,9 @@ struct RawEngineTests {
         guard let url = Self.testFileURL else { return }
         let renderer = RawImageRenderer()
         #expect(renderer.load(url: url))
-        let plain = renderer.renderPreview(params: .none, maxPixelSize: 300)
+        let plain = renderer.renderPreview(baseParams: .none, stageStack: [], maxPixelSize: 300)
         let filmic = renderer.renderPreview(
-            params: RawEditParameters(filmicRGB: .darktableDefault),
+            baseParams: .none, stageStack: [StageParameters(filmicRGB: .darktableDefault)],
             maxPixelSize: 300
         )
         let plainData = try #require(plain?.dataProvider?.data)
@@ -71,7 +71,7 @@ struct RawEngineTests {
         defer { try? FileManager.default.removeItem(at: outURL) }
         try ExportPipeline.export(
             renderer: renderer,
-            params: RawEditParameters(filmicRGB: .darktableDefault),
+            baseParams: .none, stageStack: [StageParameters(filmicRGB: .darktableDefault)],
             format: .jpeg(quality: 0.8),
             to: outURL
         )
@@ -87,9 +87,9 @@ struct RawEngineTests {
         wheels.globalY = 0.15
         wheels.shadowsC = 0.3
         wheels.shadowsH = 30
-        let plain = renderer.renderPreview(params: .none, maxPixelSize: 300)
+        let plain = renderer.renderPreview(baseParams: .none, stageStack: [], maxPixelSize: 300)
         let graded = renderer.renderPreview(
-            params: RawEditParameters(colorBalanceRGB: wheels),
+            baseParams: .none, stageStack: [StageParameters(colorBalanceRGB: wheels)],
             maxPixelSize: 300
         )
         let plainData = try #require(plain?.dataProvider?.data)
@@ -107,7 +107,7 @@ struct RawEngineTests {
         wheels.contrast = 0.2
         try ExportPipeline.export(
             renderer: renderer,
-            params: RawEditParameters(filmicRGB: .darktableDefault, colorBalanceRGB: wheels),
+            baseParams: .none, stageStack: [StageParameters(filmicRGB: .darktableDefault, colorBalanceRGB: wheels)],
             format: .jpeg(quality: 0.8),
             to: outURL
         )
@@ -120,8 +120,8 @@ struct RawEngineTests {
         let renderer = RawImageRenderer()
         #expect(renderer.load(url: url))
         let curve = RGBCurveParameters(points: [SIMD2(0, 0), SIMD2(0.25, 0.1), SIMD2(0.75, 0.9), SIMD2(1, 1)])
-        let plain = renderer.renderPreview(params: .none, maxPixelSize: 300)
-        let curved = renderer.renderPreview(params: RawEditParameters(rgbCurve: curve), maxPixelSize: 300)
+        let plain = renderer.renderPreview(baseParams: .none, stageStack: [], maxPixelSize: 300)
+        let curved = renderer.renderPreview(baseParams: .none, stageStack: [StageParameters(rgbCurve: curve)], maxPixelSize: 300)
         let plainData = try #require(plain?.dataProvider?.data)
         let curvedData = try #require(curved?.dataProvider?.data)
         #expect(plainData != curvedData)
@@ -136,7 +136,7 @@ struct RawEngineTests {
         let curve = RGBCurveParameters(points: [SIMD2(0, 0), SIMD2(0.5, 0.65), SIMD2(1, 1)])
         try ExportPipeline.export(
             renderer: renderer,
-            params: RawEditParameters(filmicRGB: .darktableDefault, rgbCurve: curve),
+            baseParams: .none, stageStack: [StageParameters(filmicRGB: .darktableDefault, rgbCurve: curve)],
             format: .jpeg(quality: 0.8),
             to: outURL
         )
@@ -151,8 +151,8 @@ struct RawEngineTests {
         let zones = ColorZonesParameters(
             chromaPoints: [SIMD2(0.25, 0.8), SIMD2(0.75, 0.5)]
         )
-        let plain = renderer.renderPreview(params: .none, maxPixelSize: 300)
-        let zoned = renderer.renderPreview(params: RawEditParameters(colorZones: zones), maxPixelSize: 300)
+        let plain = renderer.renderPreview(baseParams: .none, stageStack: [], maxPixelSize: 300)
+        let zoned = renderer.renderPreview(baseParams: .none, stageStack: [StageParameters(colorZones: zones)], maxPixelSize: 300)
         let plainData = try #require(plain?.dataProvider?.data)
         let zonedData = try #require(zoned?.dataProvider?.data)
         #expect(plainData != zonedData)
@@ -167,7 +167,7 @@ struct RawEngineTests {
         let zones = ColorZonesParameters(huePoints: [SIMD2(0.25, 0.6), SIMD2(0.75, 0.4)])
         try ExportPipeline.export(
             renderer: renderer,
-            params: RawEditParameters(filmicRGB: .darktableDefault, colorZones: zones),
+            baseParams: .none, stageStack: [StageParameters(filmicRGB: .darktableDefault, colorZones: zones)],
             format: .jpeg(quality: 0.8),
             to: outURL
         )

@@ -10,6 +10,12 @@ import RawEngine
 /// Curve editor along with it. Isolating it here keeps that dependency local to these two buttons.
 struct EditorFooterActions: View {
     let asset: PhotoAsset
+    /// "Reset All" only touches the asset's base params and this selected stage — see
+    /// `hasAnyEdits(asset:stage:)`'s doc comment for why it's scoped this way.
+    let stage: Stage
+    /// Cached active stage list, threaded through to `scheduleRender`/export — see
+    /// `EditorView.activeStages`'s doc comment for why this isn't recomputed here.
+    let activeStages: [Stage]
     let coordinator: EditorRenderCoordinator
 
     @State private var exportStatus: String?
@@ -17,10 +23,10 @@ struct EditorFooterActions: View {
     var body: some View {
         section(nil) {
             Button("Reset All") {
-                resetAllEdits(asset)
-                coordinator.scheduleRender(params: rawEditParameters(for: asset))
+                resetAllEdits(asset: asset, stage: stage)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
             }
-            .disabled(!hasAnyEdits(asset))
+            .disabled(!hasAnyEdits(asset: asset, stage: stage))
             Button("Export…") { exportImage() }
                 .disabled(!coordinator.isReady)
         }
@@ -42,7 +48,13 @@ struct EditorFooterActions: View {
 
         let format: ExportFormat = url.pathExtension.lowercased() == "tiff" ? .tiff : .jpeg(quality: 0.9)
         do {
-            try ExportPipeline.export(renderer: coordinator.renderer, params: rawEditParameters(for: asset), format: format, to: url)
+            try ExportPipeline.export(
+                renderer: coordinator.renderer,
+                baseParams: rawBaseParameters(for: asset),
+                stageStack: activeStages.map(stageParameters(for:)),
+                format: format,
+                to: url
+            )
             exportStatus = "Exported to \(url.lastPathComponent)."
         } catch {
             exportStatus = "Export failed: \(error.localizedDescription)"

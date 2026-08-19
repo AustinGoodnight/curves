@@ -24,11 +24,12 @@ public enum ExportError: Error {
 public enum ExportPipeline {
     public static func export(
         renderer: RawImageRenderer,
-        params: RawEditParameters,
+        baseParams: RawBaseParameters,
+        stageStack: [StageParameters],
         format: ExportFormat,
         to url: URL
     ) throws {
-        guard let cgImage = renderer.renderFullResolution(params: params) else {
+        guard let cgImage = renderer.renderFullResolution(baseParams: baseParams, stageStack: stageStack) else {
             throw ExportError.renderFailed
         }
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, format.utType.identifier as CFString, 1, nil) else {

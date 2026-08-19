@@ -1,13 +1,43 @@
 import Foundation
 
-/// Edit parameters passed to `CIRAWFilter`'s native inputs. Every field is optional — `nil`
-/// means "use the filter's as-shot/vendor default for this image", not zero.
-public struct RawEditParameters: Equatable, Sendable {
+/// Native `CIRAWFilter` inputs — applied once, during RAW decode, before any stage's kernel
+/// passes run. Every field is optional — `nil` means "use the filter's as-shot/vendor default for
+/// this image", not zero. Unlike `StageParameters`, there is no per-stage version of these: a RAW
+/// file is only demosaiced once per render, so exposure/white-balance/sharpness can't be stacked
+/// the way the four kernel modules can (see `StageParameters`'s doc comment).
+public struct RawBaseParameters: Equatable, Sendable {
     public var exposure: Double?
     public var boostAmount: Double?
     public var neutralTemperature: Double?
     public var neutralTint: Double?
     public var sharpnessAmount: Double?
+
+    public init(
+        exposure: Double? = nil,
+        boostAmount: Double? = nil,
+        neutralTemperature: Double? = nil,
+        neutralTint: Double? = nil,
+        sharpnessAmount: Double? = nil
+    ) {
+        self.exposure = exposure
+        self.boostAmount = boostAmount
+        self.neutralTemperature = neutralTemperature
+        self.neutralTint = neutralTint
+        self.sharpnessAmount = sharpnessAmount
+    }
+
+    public static let none = RawBaseParameters()
+}
+
+/// One stage's worth of the four *stackable* `CIColorKernel` modules. `RawImageRenderer` runs one
+/// of these per active stage (Scene, then Single, then Custom stages in order), each feeding its
+/// output forward as the next stage's input — a real sequential composite, not a merged parameter
+/// set. That's a deliberate choice, not just the simplest option: these modules are nonlinear
+/// (tone curves and Filmic's tone mapping compose as `f2(f1(x))`, not by adding control points),
+/// so there's no parameter-level shortcut that reproduces true stacking, and future per-stage
+/// masking needs the sequential form anyway — a masked stage limits which pixels its pass touches,
+/// which has no meaning as a merged parameter set.
+public struct StageParameters: Equatable, Sendable {
     /// `nil` means "no filmic tone curve" — the Phase 2 passthrough behavior. Set to enable the
     /// filmic RGB module (see `FilmicRGBParameters`).
     public var filmicRGB: FilmicRGBParameters?
@@ -24,26 +54,22 @@ public struct RawEditParameters: Equatable, Sendable {
     public var rgbCurve: RGBCurveParameters?
 
     public init(
-        exposure: Double? = nil,
-        boostAmount: Double? = nil,
-        neutralTemperature: Double? = nil,
-        neutralTint: Double? = nil,
-        sharpnessAmount: Double? = nil,
         filmicRGB: FilmicRGBParameters? = nil,
         colorBalanceRGB: ColorBalanceRGBParameters? = nil,
         colorZones: ColorZonesParameters? = nil,
         rgbCurve: RGBCurveParameters? = nil
     ) {
-        self.exposure = exposure
-        self.boostAmount = boostAmount
-        self.neutralTemperature = neutralTemperature
-        self.neutralTint = neutralTint
-        self.sharpnessAmount = sharpnessAmount
         self.filmicRGB = filmicRGB
         self.colorBalanceRGB = colorBalanceRGB
         self.colorZones = colorZones
         self.rgbCurve = rgbCurve
     }
 
-    public static let none = RawEditParameters()
+    /// True when this stage contributes no kernel passes at all — the render loop can skip it
+    /// entirely rather than running four no-op checks.
+    public var isEmpty: Bool {
+        filmicRGB == nil && colorBalanceRGB == nil && colorZones == nil && rgbCurve == nil
+    }
+
+    public static let none = StageParameters()
 }

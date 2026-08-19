@@ -74,14 +74,14 @@ struct VerticalGradientSlider: View {
 
 extension Gradient {
     /// Bottom = cool (low Kelvin reading on the slider), top = warm — matches
-    /// `RawEditParameters.neutralTemperature`'s 2000...12000 range. Same vivid Apple system-color
+    /// `RawBaseParameters.neutralTemperature`'s 2000...12000 range. Same vivid Apple system-color
     /// saturation level as `colorIntensity`'s red/green/blue, rather than the original muted take.
     static let neutralTemperature = Gradient(stops: [
         .init(color: Color(red: 10 / 255, green: 132 / 255, blue: 255 / 255), location: 0),
         .init(color: Color(red: 154 / 255, green: 154 / 255, blue: 156 / 255), location: 0.35),
         .init(color: Color(red: 255 / 255, green: 159 / 255, blue: 10 / 255), location: 1),
     ])
-    /// Bottom = green, top = magenta — matches `RawEditParameters.neutralTint`'s -150...150 range.
+    /// Bottom = green, top = magenta — matches `RawBaseParameters.neutralTint`'s -150...150 range.
     static let neutralTint = Gradient(stops: [
         .init(color: Color(red: 48 / 255, green: 209 / 255, blue: 88 / 255), location: 0),
         .init(color: Color(red: 154 / 255, green: 154 / 255, blue: 156 / 255), location: 0.5),

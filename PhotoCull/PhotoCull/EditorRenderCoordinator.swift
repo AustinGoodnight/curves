@@ -18,7 +18,16 @@ final class EditorRenderCoordinator {
     private(set) var previewImage: CGImage?
     private(set) var luminanceHistogram: [Float] = []
     private(set) var hueHistogram: [Float] = []
+    private(set) var rgbHistogram = RGBHistogramData()
+    private(set) var colorDensity: [Float] = []
     private(set) var isReady = false
+
+    /// A base-params + stage-stack pair — everything one render needs. Bundled into one struct
+    /// rather than two parallel optionals so `latestParams`/`lastRenderedParams` can't desync.
+    struct RenderRequest: Equatable {
+        var baseParams: RawBaseParameters
+        var stageStack: [StageParameters]
+    }
 
     private var histogramGeneration = 0
     /// Bumped on every `scheduleRender` call — used only to detect "input has actually gone
@@ -27,21 +36,22 @@ final class EditorRenderCoordinator {
     /// belong here).
     private var debounceGeneration = 0
     private var isRenderLoopRunning = false
-    /// The newest params requested but not yet rendered. Overwritten, never queued — a burst of
+    /// The newest request queued but not yet rendered. Overwritten, never queued — a burst of
     /// slider ticks during an in-flight render collapses to "render whatever's newest once it's
     /// free," never a backlog of stale, superseded renders.
-    private var latestParams: RawEditParameters?
-    private var lastRenderedParams: RawEditParameters?
+    private var latestParams: RenderRequest?
+    private var lastRenderedParams: RenderRequest?
 
-    func loadAndRender(url: URL, params: RawEditParameters) async {
+    func loadAndRender(url: URL, baseParams: RawBaseParameters, stageStack: [StageParameters]) async {
+        let request = RenderRequest(baseParams: baseParams, stageStack: stageStack)
         let (loaded, image) = await Task.detached(priority: .userInitiated) { [renderer] () -> (Bool, CGImage?) in
             let loaded = renderer.load(url: url)
             guard loaded else { return (false, nil) }
-            return (true, renderer.renderPreview(params: params, maxPixelSize: 1600))
+            return (true, renderer.renderPreview(baseParams: request.baseParams, stageStack: request.stageStack, maxPixelSize: 1600))
         }.value
         isReady = loaded
         previewImage = image
-        lastRenderedParams = params
+        lastRenderedParams = request
         if let image { updateHistograms(from: image) }
     }
 
@@ -52,9 +62,9 @@ final class EditorRenderCoordinator {
     /// anyway — `startRenderLoopIfNeeded` already coalesces a burst of calls down to "render
     /// whatever's newest once the previous render is free," which is the actual throttling this
     /// needs.
-    func scheduleRender(params: RawEditParameters) {
+    func scheduleRender(baseParams: RawBaseParameters, stageStack: [StageParameters]) {
         debounceGeneration += 1
-        latestParams = params
+        latestParams = RenderRequest(baseParams: baseParams, stageStack: stageStack)
         startRenderLoopIfNeeded()
     }
 
@@ -93,11 +103,11 @@ final class EditorRenderCoordinator {
         }
     }
 
-    private func render(params: RawEditParameters, draft: Bool) async {
+    private func render(params: RenderRequest, draft: Bool) async {
         lastRenderedParams = params
         let renderer = renderer
         let image = await Task.detached(priority: .userInitiated) {
-            renderer.renderPreview(params: params, maxPixelSize: 1600, draft: draft)
+            renderer.renderPreview(baseParams: params.baseParams, stageStack: params.stageStack, maxPixelSize: 1600, draft: draft)
         }.value
         if let image {
             previewImage = image
@@ -115,10 +125,14 @@ final class EditorRenderCoordinator {
         Task.detached(priority: .utility) {
             let luminance = Histogram.luminance(from: image)
             let hue = Histogram.hue(from: image)
+            let rgb = Histogram.rgbChannels(from: image)
+            let density = Histogram.colorDensity(from: image)
             await MainActor.run { [weak self] in
                 guard let self, generation == self.histogramGeneration else { return }
                 self.luminanceHistogram = luminance
                 self.hueHistogram = hue
+                self.rgbHistogram = rgb
+                self.colorDensity = density
             }
         }
     }

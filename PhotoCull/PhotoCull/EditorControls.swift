@@ -14,12 +14,28 @@ func resetButton(disabled: Bool, action: @escaping () -> Void) -> some View {
     .disabled(disabled)
 }
 
+/// A section/module title that also toggles `enabled` when tapped — a bigger, more convenient
+/// target than the switch alone, which stays put right next to it as the actual state indicator
+/// (tapping the title doesn't remove the visual "is this on" feedback, it just gives a second way
+/// to flip it). Plain, non-interactive text when `enabled` is `nil` — a title with nothing to
+/// toggle shouldn't look/feel clickable.
+func sectionTitle(_ title: String, enabled: Binding<Bool>?) -> some View {
+    Text(title)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            enabled?.wrappedValue.toggle()
+        }
+        .allowsHitTesting(enabled != nil)
+}
+
 /// Flat, borderless replacement for `Form`'s boxed `Section` — a plain header + content stack,
 /// no background/chrome. `title == nil` renders content alone (used for a trailing button row
 /// that doesn't want a header). Passing `onReset` adds a small reset icon next to the header;
-/// passing `enabled` adds a module bypass switch (see `PhotoAsset.editColorBalanceEnabled` and
+/// passing `enabled` adds a module bypass stoplight (see `PhotoAsset.editColorBalanceEnabled` and
 /// its siblings — skips the module's `CIColorKernel` pass entirely when off, not just at its
-/// no-op defaults).
+/// no-op defaults) and makes the title itself tap-to-toggle (see `sectionTitle`).
 func section<Content: View>(
     _ title: String?,
     resetDisabled: Bool = true,
@@ -30,17 +46,13 @@ func section<Content: View>(
     VStack(alignment: .leading, spacing: 10) {
         if let title {
             HStack(spacing: 4) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                sectionTitle(title, enabled: enabled)
                 if let onReset {
                     resetButton(disabled: resetDisabled, action: onReset)
                 }
                 if let enabled {
                     Spacer()
-                    Toggle("", isOn: enabled)
-                        .labelsHidden()
-                        .controlSize(.small)
+                    StoplightToggle(isOn: enabled)
                 }
             }
         }

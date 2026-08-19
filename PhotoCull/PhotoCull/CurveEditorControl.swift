@@ -3,10 +3,9 @@ import RawEngine
 
 /// A Lightroom/Photoshop-style tone curve editor: drag existing points, click empty graph space
 /// to add a new one (up to `RGBCurveKernel.maxNodes`), double-click an interior point to remove
-/// it. The two endpoints are always present and locked to x = 0 / x = 1 (the curve's domain is
-/// fixed to the full input range — only their height is adjustable) — interior points are free
-/// to move in both axes, clamped between their immediate neighbors so the curve can't fold back
-/// on itself.
+/// it. The two endpoints are always present and can't be removed, but — like every other point —
+/// are free to move in both axes, clamped only against whichever neighbor sits next to them (or
+/// the domain edge, 0 or 1, on the side that has none) so the curve can't fold back on itself.
 ///
 /// Width is driven by whatever space the parent gives it (via `GeometryReader`) rather than a
 /// fixed constant, so this stretches to fill a full-width bar; `height` is the one fixed
@@ -95,6 +94,7 @@ struct CurveEditorControl: View {
                 }
                 .background(graphBackground)
                 .clipShape(graphClipShape)
+                .overlay(graphClipShape.stroke(Color.primary.opacity(0.2), lineWidth: 1))
             }
             .frame(height: height)
 
@@ -115,14 +115,16 @@ struct CurveEditorControl: View {
     private static let hueSpectrum: [Color] = stride(from: 0.0, through: 1.0, by: 1.0 / 12.0)
         .map { Color(hue: $0, saturation: 0.85, brightness: 0.95) }
 
-    /// Color Zones gets the spectrum; RGB Curve keeps the same subtle grey it's always had.
+    /// Color Zones gets the spectrum; RGB Curve gets no fill at all — it now sits directly on
+    /// whatever background it's placed against (the sidebar's own) rather than a lighter panel
+    /// color, with `graphClipShape.stroke(...)` (see above) as the only thing marking its bounds.
     @ViewBuilder
     private var graphBackground: some View {
         if showHueAxis {
             LinearGradient(colors: Self.hueSpectrum, startPoint: .leading, endPoint: .trailing)
                 .opacity(0.55)
         } else {
-            Color.primary.opacity(0.05)
+            Color.clear
         }
     }
 
@@ -170,14 +172,19 @@ struct CurveEditorControl: View {
         .stroke(Color.primary.opacity(0.4), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
     }
 
+    /// Uses the same `width` parameter (and the stored `height`) as `curveStroke`/`referenceLines`
+    /// rather than `Canvas`'s own `size` argument — both should already match since every ZStack
+    /// sibling here is proposed the same box by the enclosing `GeometryReader`, but sharing one
+    /// source of truth rules out any drift between the bars and the curve/points sitting on top
+    /// of them instead of leaving it to coincidence.
     private func histogramBars(width: CGFloat) -> some View {
-        Canvas { context, size in
+        Canvas { context, _ in
             guard let histogram, !histogram.isEmpty else { return }
-            let binWidth = size.width / CGFloat(histogram.count)
+            let binWidth = width / CGFloat(histogram.count)
             for (i, value) in histogram.enumerated() {
-                let barHeight = CGFloat(value) * size.height
+                let barHeight = CGFloat(value) * height
                 let rect = CGRect(
-                    x: CGFloat(i) * binWidth, y: size.height - barHeight,
+                    x: CGFloat(i) * binWidth, y: height - barHeight,
                     width: max(1, binWidth - 0.5), height: barHeight
                 )
                 context.fill(Path(rect), with: .color(Color.primary.opacity(0.12)))
@@ -232,7 +239,7 @@ struct CurveEditorControl: View {
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    updatePoint(originalValue: p, isEndpoint: isEndpoint, to: curveValue(for: value.location, width: width))
+                    updatePoint(originalValue: p, to: curveValue(for: value.location, width: width))
                 }
         )
         .onTapGesture(count: 2) {
@@ -243,18 +250,21 @@ struct CurveEditorControl: View {
 
     // MARK: - Mutation
 
-    private func updatePoint(originalValue: SIMD2<Double>, isEndpoint: Bool, to newValue: SIMD2<Double>) {
+    /// Every point, endpoints included, clamps to the same rule: stay past its immediate
+    /// neighbor (by `minGap`, so segments can't collapse to zero width) and stay inside the
+    /// domain otherwise. The two endpoints used to lock `x` to their original 0/1 position
+    /// entirely — vertical movement only — but that's needlessly restrictive: an endpoint with
+    /// no inner neighbor on one side just clamps to the domain edge (0 or 1) on that side instead
+    /// of to a neighbor, which is exactly "free to slide along the top/bottom edge, can't cross
+    /// the point next to it."
+    private func updatePoint(originalValue: SIMD2<Double>, to newValue: SIMD2<Double>) {
         guard let index = points.firstIndex(of: originalValue) else { return }
+        let ordered = sortedPoints
+        guard let orderedIndex = ordered.firstIndex(of: originalValue) else { return }
+        let lowerBound = orderedIndex > 0 ? ordered[orderedIndex - 1].x + minGap : 0
+        let upperBound = orderedIndex < ordered.count - 1 ? ordered[orderedIndex + 1].x - minGap : 1
         var updated = newValue
-        if isEndpoint {
-            updated.x = originalValue.x
-        } else {
-            let ordered = sortedPoints
-            guard let orderedIndex = ordered.firstIndex(of: originalValue) else { return }
-            let lowerBound = ordered[orderedIndex - 1].x + minGap
-            let upperBound = ordered[orderedIndex + 1].x - minGap
-            updated.x = min(max(updated.x, lowerBound), upperBound)
-        }
+        updated.x = min(max(updated.x, lowerBound), upperBound)
         points[index] = updated
         onChange()
     }

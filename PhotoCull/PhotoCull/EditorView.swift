@@ -14,10 +14,33 @@ struct EditorView: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var coordinator = EditorRenderCoordinator()
+    /// Which stage's own values the controls currently show ("blank slate" editing — see
+    /// `Stage`'s doc comment). Never affects what's rendered; the preview always composites
+    /// `activeStages` regardless of this selection.
+    @State private var selectedStage: Stage
+    /// The Scene/Single/Custom stages currently contributing to the composite, cached rather than
+    /// recomputed via `activeStageStack(for:)` on every render — that walks the asset's `scene`/
+    /// `stages` relationships, which is real, measurable work when it runs on every single slider-
+    /// drag tick. Refreshed explicitly (`refreshActiveStages()`) only when stage membership itself
+    /// changes: add/delete/enable-toggle. Editing a stage's own field values doesn't need a
+    /// refresh — those still read fresh off the `Stage` objects already in this array.
+    @State private var activeStages: [Stage]
+
+    init(asset: PhotoAsset) {
+        self.asset = asset
+        let single = asset.singleStage
+        _selectedStage = State(initialValue: single)
+        _activeStages = State(initialValue: activeStageStack(for: asset))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
+                StagesSidebarView(
+                    asset: asset, selectedStage: $selectedStage, activeStages: $activeStages, coordinator: coordinator
+                )
+                .frame(minWidth: 160, idealWidth: 200, maxWidth: 280)
+
                 ZStack {
                     Color.black
                     if let previewImage = coordinator.previewImage {
@@ -34,10 +57,13 @@ struct EditorView: View {
                 .frame(minWidth: 480, minHeight: 400)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                EditorSidebarView(asset: asset, coordinator: coordinator)
+                EditorSidebarView(asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator)
             }
 
-            ColorBalanceBarView(asset: asset, coordinator: coordinator, wheelDiameter: wheelDiameter)
+            ColorBalanceBarView(
+                asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator,
+                wheelDiameter: wheelDiameter
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(asset.fileName)
@@ -50,7 +76,11 @@ struct EditorView: View {
             }
         }
         .task(id: asset.filePath) {
-            await coordinator.loadAndRender(url: asset.resolvedURL(), params: rawEditParameters(for: asset))
+            await coordinator.loadAndRender(
+                url: asset.resolvedURL(),
+                baseParams: rawBaseParameters(for: asset),
+                stageStack: activeStages.map(stageParameters(for:))
+            )
         }
     }
 
