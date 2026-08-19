@@ -27,6 +27,7 @@ struct CurveEditorHost: View, Equatable {
     var showHueAxis: Bool = false
     var showHeader: Bool = true
     var topCornersSquared: Bool = false
+    var lineColor: Color = .accentColor
     var onPointsChange: ([SIMD2<Double>]) -> Void
 
     /// `splineType` is excluded deliberately: it's a fixed constant per call site (RGB Curve is
@@ -37,7 +38,7 @@ struct CurveEditorHost: View, Equatable {
             && lhs.identityPoints == rhs.identityPoints && lhs.maxPoints == rhs.maxPoints
             && lhs.referenceIsFlat == rhs.referenceIsFlat && lhs.histogram == rhs.histogram
             && lhs.showHueAxis == rhs.showHueAxis && lhs.showHeader == rhs.showHeader
-            && lhs.topCornersSquared == rhs.topCornersSquared
+            && lhs.topCornersSquared == rhs.topCornersSquared && lhs.lineColor == rhs.lineColor
     }
 
     var body: some View {
@@ -52,7 +53,8 @@ struct CurveEditorHost: View, Equatable {
             histogram: histogram,
             showHueAxis: showHueAxis,
             showHeader: showHeader,
-            topCornersSquared: topCornersSquared
+            topCornersSquared: topCornersSquared,
+            lineColor: lineColor
         )
     }
 }

@@ -74,24 +74,26 @@ struct VerticalGradientSlider: View {
 
 extension Gradient {
     /// Bottom = cool (low Kelvin reading on the slider), top = warm — matches
-    /// `RawEditParameters.neutralTemperature`'s 2000...12000 range.
+    /// `RawEditParameters.neutralTemperature`'s 2000...12000 range. Same vivid Apple system-color
+    /// saturation level as `colorIntensity`'s red/green/blue, rather than the original muted take.
     static let neutralTemperature = Gradient(stops: [
-        .init(color: Color(red: 79 / 255, green: 143 / 255, blue: 232 / 255), location: 0),
+        .init(color: Color(red: 10 / 255, green: 132 / 255, blue: 255 / 255), location: 0),
         .init(color: Color(red: 154 / 255, green: 154 / 255, blue: 156 / 255), location: 0.35),
-        .init(color: Color(red: 232 / 255, green: 163 / 255, blue: 57 / 255), location: 1),
+        .init(color: Color(red: 255 / 255, green: 159 / 255, blue: 10 / 255), location: 1),
     ])
     /// Bottom = green, top = magenta — matches `RawEditParameters.neutralTint`'s -150...150 range.
     static let neutralTint = Gradient(stops: [
-        .init(color: Color(red: 95 / 255, green: 191 / 255, blue: 106 / 255), location: 0),
+        .init(color: Color(red: 48 / 255, green: 209 / 255, blue: 88 / 255), location: 0),
         .init(color: Color(red: 154 / 255, green: 154 / 255, blue: 156 / 255), location: 0.5),
-        .init(color: Color(red: 216 / 255, green: 116 / 255, blue: 201 / 255), location: 1),
+        .init(color: Color(red: 255 / 255, green: 45 / 255, blue: 210 / 255), location: 1),
     ])
-    /// Bottom = muted/desaturated, top = vivid — for Chroma/Vibrance/Saturation, where "more" is
-    /// literally more colorfulness rather than a hue shift, so the gradient goes intensity-only
-    /// instead of between two hues like `neutralTemperature`/`neutralTint`.
+    /// Bottom-to-top red → green → blue — a more vivid experiment for Chroma/Vibrance/Saturation
+    /// than the earlier muted-to-vivid single-hue version. Not meant to encode direction/meaning
+    /// the way `neutralTemperature`/`neutralTint` do; it's decorative, just something more
+    /// colorful for these three "more colorfulness" sliders to sit next to.
     static let colorIntensity = Gradient(stops: [
-        .init(color: Color(red: 90 / 255, green: 90 / 255, blue: 92 / 255), location: 0),
-        .init(color: Color(red: 154 / 255, green: 154 / 255, blue: 156 / 255), location: 0.5),
-        .init(color: Color(red: 224 / 255, green: 90 / 255, blue: 72 / 255), location: 1),
+        .init(color: Color(red: 255 / 255, green: 69 / 255, blue: 58 / 255), location: 0),
+        .init(color: Color(red: 48 / 255, green: 209 / 255, blue: 88 / 255), location: 0.5),
+        .init(color: Color(red: 10 / 255, green: 132 / 255, blue: 255 / 255), location: 1),
     ])
 }

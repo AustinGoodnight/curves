@@ -34,10 +34,10 @@ struct CurveEditorControl: View {
     /// same [0, 1] domain as the curve itself, so a luminance or hue histogram lines up directly
     /// under the points that affect that range.
     var histogram: [Float]? = nil
-    /// Draws a full-saturation hue spectrum strip below the graph — Color Zones' x-axis *is* hue
-    /// (0...1 mapping to 0°...360°), so this lets the user see which colors a given x-position
-    /// actually affects instead of reading it off the numeric axis. RGB Curve's x-axis is input
-    /// tone, not hue, so this stays off there.
+    /// Tints the graph's own background with a full-saturation hue spectrum — Color Zones' x-axis
+    /// *is* hue (0...1 mapping to 0°...360°), so this lets the user see which colors a given
+    /// x-position actually affects instead of reading it off the numeric axis. RGB Curve's x-axis
+    /// is input tone, not hue, so this stays off there.
     var showHueAxis: Bool = false
     /// Hides the title / "click to add a point" hint / per-curve reset row — for call sites that
     /// already show their own title and reset elsewhere (Color Zones folds its reset into the
@@ -48,6 +48,10 @@ struct CurveEditorControl: View {
     /// (Color Zones' channel-switcher strip in `ColorBalanceBarView`) with no mismatched seam —
     /// the two read as one continuous card instead of two stacked, independently-rounded boxes.
     var topCornersSquared: Bool = false
+    /// Curve stroke color — `.accentColor` (blue) reads fine against RGB Curve's plain grey
+    /// background, but blends into the blue stretch of Color Zones' own hue-spectrum background,
+    /// so that call site overrides it.
+    var lineColor: Color = .accentColor
     var onChange: () -> Void = {}
 
     /// Minimum x-separation enforced between adjacent points, in curve-space [0, 1] — prevents
@@ -79,7 +83,9 @@ struct CurveEditorControl: View {
             GeometryReader { geo in
                 let width = geo.size.width
                 ZStack {
-                    histogramBars(width: width)
+                    if !showHueAxis {
+                        histogramBars(width: width)
+                    }
                     referenceLines(width: width)
                     curveStroke(width: width)
                     addPointLayer(width: width)
@@ -87,7 +93,7 @@ struct CurveEditorControl: View {
                         pointHandle(at: i, width: width)
                     }
                 }
-                .background(Color.primary.opacity(0.05))
+                .background(graphBackground)
                 .clipShape(graphClipShape)
             }
             .frame(height: height)
@@ -100,14 +106,25 @@ struct CurveEditorControl: View {
 
     private var graphClipShape: AnyShape {
         topCornersSquared
-            ? AnyShape(UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 4, bottomTrailingRadius: 4, topTrailingRadius: 0))
-            : AnyShape(RoundedRectangle(cornerRadius: 4))
+            ? AnyShape(UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 12, bottomTrailingRadius: 12, topTrailingRadius: 0))
+            : AnyShape(RoundedRectangle(cornerRadius: 12))
     }
 
     /// Full-saturation spectrum, both ends red — hue wraps at 0°/360°, so a `LinearGradient` with
     /// matching colors at x = 0 and x = 1 reads correctly against the graph's own [0, 1] domain.
     private static let hueSpectrum: [Color] = stride(from: 0.0, through: 1.0, by: 1.0 / 12.0)
         .map { Color(hue: $0, saturation: 0.85, brightness: 0.95) }
+
+    /// Color Zones gets the spectrum; RGB Curve keeps the same subtle grey it's always had.
+    @ViewBuilder
+    private var graphBackground: some View {
+        if showHueAxis {
+            LinearGradient(colors: Self.hueSpectrum, startPoint: .leading, endPoint: .trailing)
+                .opacity(0.55)
+        } else {
+            Color.primary.opacity(0.05)
+        }
+    }
 
     private var hueAxisStrip: some View {
         LinearGradient(colors: Self.hueSpectrum, startPoint: .leading, endPoint: .trailing)
@@ -150,7 +167,7 @@ struct CurveEditorControl: View {
                 path.addLine(to: CGPoint(x: width, y: 0))
             }
         }
-        .stroke(Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+        .stroke(Color.primary.opacity(0.4), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
     }
 
     private func histogramBars(width: CGFloat) -> some View {
@@ -179,7 +196,7 @@ struct CurveEditorControl: View {
                 if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
             }
         }
-        .stroke(Color.accentColor, lineWidth: 1.5)
+        .stroke(lineColor, lineWidth: 1.5)
     }
 
     /// Invisible full-size layer beneath the point handles; a tap here that doesn't land on an
@@ -193,15 +210,22 @@ struct CurveEditorControl: View {
             }
     }
 
+    /// Same white-circle + small-center-dot + shadow look as the color wheels' own puck
+    /// (`ColorWheelControl`'s `puckDiameter`-sized `Circle` over its 3pt center dot) — one
+    /// consistent "control dial" language for every draggable handle in the editor, not a plain
+    /// dot here and a fuller puck there.
     private func pointHandle(at index: Int, width: CGFloat) -> some View {
         let isEndpoint = index == 0 || index == sortedPoints.count - 1
         let p = sortedPoints[index]
         return ZStack {
-            Circle().fill(Color.clear).frame(width: 22, height: 22)
+            Circle().fill(Color.clear).frame(width: 24, height: 24)
             Circle()
                 .fill(Color.white)
-                .frame(width: 9, height: 9)
+                .frame(width: 13, height: 13)
                 .shadow(radius: 1)
+            Circle()
+                .fill(Color.primary.opacity(0.4))
+                .frame(width: 3, height: 3)
         }
         .contentShape(Circle())
         .position(screenPoint(for: p, width: width))

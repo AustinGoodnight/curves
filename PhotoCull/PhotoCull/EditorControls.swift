@@ -87,6 +87,7 @@ func verticalGradientSlider(
         Text(title)
             .font(.caption)
             .foregroundStyle(.secondary)
+            .fixedSize()
         VerticalGradientSlider(value: value, range: range, gradient: gradient, resetValue: resetValue)
             .frame(height: trackHeight)
         if !valueText.isEmpty {
