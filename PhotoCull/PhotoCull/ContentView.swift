@@ -62,34 +62,50 @@ struct ContentView: View {
             )
         } detail: {
             NavigationStack {
-                CullingGridView(
-                    assets: filteredAssets,
-                    selection: $selection,
-                    onGroupStack: groupSelectedIntoStack,
-                    onUnstack: unstackSelected,
-                    onOpenEditor: { editingAsset = $0 }
-                )
-                .id(refreshTrigger)
+                // Gated on `editingAsset == nil` rather than always constructing the grid: this
+                // view is pushed via `navigationDestination` below, not presented modally, so
+                // `CullingGridView` stays mounted underneath the editor for back-navigation.
+                // `filteredAssets` re-filters/re-sorts the whole library and `CullingGridView`'s
+                // own `displayItems` redoes an O(n²)-ish stack-grouping pass — both uncached,
+                // both re-evaluated by SwiftUI's `@Query` on *any* tracked-property change to
+                // *any* fetched `PhotoAsset`, which includes every single edit made while the
+                // editor is open. On a real library that's expensive enough to stall the main
+                // thread for a few hundred ms per slider tick — this is what was actually behind
+                // "renders fine once you release, but does nothing while sliding": the render
+                // pipeline itself was never the bottleneck, this hidden background recompute was.
+                Group {
+                    if editingAsset == nil {
+                        CullingGridView(
+                            assets: filteredAssets,
+                            selection: $selection,
+                            onGroupStack: groupSelectedIntoStack,
+                            onUnstack: unstackSelected,
+                            onOpenEditor: { editingAsset = $0 }
+                        )
+                        .id(refreshTrigger)
+                        .overlay {
+                            if allAssets.isEmpty {
+                                ContentUnavailableView(
+                                    "No Photos",
+                                    systemImage: "photo.on.rectangle.angled",
+                                    description: Text("Import a folder of RAW files to get started.")
+                                )
+                            } else if filteredAssets.isEmpty {
+                                ContentUnavailableView(
+                                    "No Matches",
+                                    systemImage: "line.3.horizontal.decrease.circle",
+                                    description: Text("No photos match the current filter.")
+                                )
+                            }
+                        }
+                    }
+                }
                 .navigationTitle(selectedScene?.name ?? "PhotoCull")
                 .toolbar { toolbarContent }
-                .sheet(item: $editingAsset) { asset in
+                .toolbarBackground(Color.sidebarBackground, for: .windowToolbar)
+                .toolbarBackground(.visible, for: .windowToolbar)
+                .navigationDestination(item: $editingAsset) { asset in
                     EditorView(asset: asset)
-                        .frame(minWidth: 900, minHeight: 600)
-                }
-                .overlay {
-                    if allAssets.isEmpty {
-                        ContentUnavailableView(
-                            "No Photos",
-                            systemImage: "photo.on.rectangle.angled",
-                            description: Text("Import a folder of RAW files to get started.")
-                        )
-                    } else if filteredAssets.isEmpty {
-                        ContentUnavailableView(
-                            "No Matches",
-                            systemImage: "line.3.horizontal.decrease.circle",
-                            description: Text("No photos match the current filter.")
-                        )
-                    }
                 }
             }
         }

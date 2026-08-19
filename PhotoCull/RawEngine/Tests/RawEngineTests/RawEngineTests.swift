@@ -1,3 +1,4 @@
+import CoreImage
 import Foundation
 import Testing
 @testable import RawEngine
@@ -112,6 +113,147 @@ struct RawEngineTests {
         )
         let attrs = try FileManager.default.attributesOfItem(atPath: outURL.path)
         #expect((attrs[.size] as? Int ?? 0) > 0)
+    }
+
+    @Test func rgbCurveRendersAndDiffersFromPassthrough() throws {
+        guard let url = Self.testFileURL else { return }
+        let renderer = RawImageRenderer()
+        #expect(renderer.load(url: url))
+        let curve = RGBCurveParameters(points: [SIMD2(0, 0), SIMD2(0.25, 0.1), SIMD2(0.75, 0.9), SIMD2(1, 1)])
+        let plain = renderer.renderPreview(params: .none, maxPixelSize: 300)
+        let curved = renderer.renderPreview(params: RawEditParameters(rgbCurve: curve), maxPixelSize: 300)
+        let plainData = try #require(plain?.dataProvider?.data)
+        let curvedData = try #require(curved?.dataProvider?.data)
+        #expect(plainData != curvedData)
+    }
+
+    @Test func rgbCurveExportProducesReadableJPEG() throws {
+        guard let url = Self.testFileURL else { return }
+        let renderer = RawImageRenderer()
+        #expect(renderer.load(url: url))
+        let outURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        defer { try? FileManager.default.removeItem(at: outURL) }
+        let curve = RGBCurveParameters(points: [SIMD2(0, 0), SIMD2(0.5, 0.65), SIMD2(1, 1)])
+        try ExportPipeline.export(
+            renderer: renderer,
+            params: RawEditParameters(filmicRGB: .darktableDefault, rgbCurve: curve),
+            format: .jpeg(quality: 0.8),
+            to: outURL
+        )
+        let attrs = try FileManager.default.attributesOfItem(atPath: outURL.path)
+        #expect((attrs[.size] as? Int ?? 0) > 0)
+    }
+
+    @Test func colorZonesRendersAndDiffersFromPassthrough() throws {
+        guard let url = Self.testFileURL else { return }
+        let renderer = RawImageRenderer()
+        #expect(renderer.load(url: url))
+        let zones = ColorZonesParameters(
+            chromaPoints: [SIMD2(0.25, 0.8), SIMD2(0.75, 0.5)]
+        )
+        let plain = renderer.renderPreview(params: .none, maxPixelSize: 300)
+        let zoned = renderer.renderPreview(params: RawEditParameters(colorZones: zones), maxPixelSize: 300)
+        let plainData = try #require(plain?.dataProvider?.data)
+        let zonedData = try #require(zoned?.dataProvider?.data)
+        #expect(plainData != zonedData)
+    }
+
+    @Test func colorZonesExportProducesReadableJPEG() throws {
+        guard let url = Self.testFileURL else { return }
+        let renderer = RawImageRenderer()
+        #expect(renderer.load(url: url))
+        let outURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        defer { try? FileManager.default.removeItem(at: outURL) }
+        let zones = ColorZonesParameters(huePoints: [SIMD2(0.25, 0.6), SIMD2(0.75, 0.4)])
+        try ExportPipeline.export(
+            renderer: renderer,
+            params: RawEditParameters(filmicRGB: .darktableDefault, colorZones: zones),
+            format: .jpeg(quality: 0.8),
+            to: outURL
+        )
+        let attrs = try FileManager.default.attributesOfItem(atPath: outURL.path)
+        #expect((attrs[.size] as? Int ?? 0) > 0)
+    }
+}
+
+@Suite("ColorZonesMath")
+struct ColorZonesMathTests {
+    @Test func labRoundTripIsCloseToIdentity() {
+        let samples: [Triplet] = [
+            Triplet(x: 0.2, y: 0.5, z: 0.8),
+            Triplet(x: 0.9, y: 0.1, z: 0.05),
+            Triplet(x: 0.01, y: 0.01, z: 0.01),
+            Triplet(x: 1.0, y: 1.0, z: 1.0)
+        ]
+        for rgb in samples {
+            let lab = ColorZonesMath.rgbToLab(rgb)
+            let roundTripped = ColorZonesMath.labToRGB(lab)
+            #expect(abs(roundTripped.x - rgb.x) < 1e-6)
+            #expect(abs(roundTripped.y - rgb.y) < 1e-6)
+            #expect(abs(roundTripped.z - rgb.z) < 1e-6)
+        }
+    }
+
+    @Test func neutralGrayHasNearZeroChroma() {
+        let gray = Triplet(x: 0.5, y: 0.5, z: 0.5)
+        let lab = ColorZonesMath.rgbToLab(gray)
+        #expect(abs(lab.y) < 1e-6)
+        #expect(abs(lab.z) < 1e-6)
+    }
+}
+
+@Suite("RGBCurveSpline")
+struct RGBCurveSplineTests {
+    @Test func identityTwoPointCurveIsANoOp() {
+        let spline = RGBCurveSpline(points: RGBCurveParameters.identityPoints.map { (x: $0.x, y: $0.y) })
+        for x in stride(from: 0.0, through: 1.0, by: 0.1) {
+            #expect(abs(spline.evaluate(x) - x) < 1e-9)
+        }
+    }
+
+    @Test func evaluationIsExactAtControlPoints() {
+        let points: [(x: Double, y: Double)] = [(0, 0), (0.3, 0.5), (0.7, 0.4), (1, 1)]
+        let spline = RGBCurveSpline(points: points)
+        for point in points {
+            #expect(abs(spline.evaluate(point.x) - point.y) < 1e-9)
+        }
+    }
+
+    @Test func monotonicControlPointsProduceMonotonicCurve() {
+        // The whole point of the monotone-Hermite variant over plain Catmull-Rom: it must not
+        // overshoot/ring between monotonically increasing control points.
+        let points: [(x: Double, y: Double)] = [(0, 0), (0.2, 0.1), (0.5, 0.5), (0.8, 0.9), (1, 1)]
+        let spline = RGBCurveSpline(points: points)
+        var previous = -Double.infinity
+        for i in stride(from: 0, through: 1000, by: 1) {
+            let x = Double(i) / 1000
+            let y = spline.evaluate(x)
+            #expect(y >= previous - 1e-9)
+            previous = y
+        }
+    }
+
+    @Test func outOfDomainValuesAreFlatExtrapolated() {
+        let points: [(x: Double, y: Double)] = [(0.2, 0.1), (0.8, 0.9)]
+        let spline = RGBCurveSpline(points: points)
+        #expect(spline.evaluate(-1) == spline.evaluate(0.2))
+        #expect(spline.evaluate(2) == spline.evaluate(0.8))
+    }
+
+    @Test func catmullRomIsExactAtControlPointsAndFlatIdentity() {
+        // colorzones.c's default curve_type — flat 2-node identity (both y = 0.5) must stay
+        // exactly 0.5 everywhere, same as the monotone-Hermite identity case.
+        let flatPoints = ColorZonesParameters.identityPoints.map { (x: $0.x, y: $0.y) }
+        let flat = RGBCurveSpline(points: flatPoints, type: .catmullRom)
+        for x in stride(from: 0.0, through: 1.0, by: 0.1) {
+            #expect(abs(flat.evaluate(x) - 0.5) < 1e-9)
+        }
+
+        let points: [(x: Double, y: Double)] = [(0, 0), (0.3, 0.7), (0.6, 0.2), (1, 1)]
+        let spline = RGBCurveSpline(points: points, type: .catmullRom)
+        for point in points {
+            #expect(abs(spline.evaluate(point.x) - point.y) < 1e-9)
+        }
     }
 }
 

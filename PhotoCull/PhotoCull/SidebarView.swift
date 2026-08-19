@@ -35,6 +35,8 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(Color.sidebarBackground)
         .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
     }
 

@@ -87,6 +87,7 @@ struct CullingGridView: View {
                         withAnimation { proxy.scrollTo(newValue, anchor: .center) }
                     }
                 }
+                .background(Color.workspaceBackground)
             }
             .onAppear {
                 updateColumnCount(for: geo.size.width)

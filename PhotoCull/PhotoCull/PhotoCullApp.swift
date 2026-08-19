@@ -19,5 +19,6 @@ struct PhotoCullApp: App {
             ContentView()
         }
         .modelContainer(sharedModelContainer)
+        .windowStyle(.hiddenTitleBar)
     }
 }

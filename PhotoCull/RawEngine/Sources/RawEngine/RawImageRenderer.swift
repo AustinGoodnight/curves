@@ -55,15 +55,31 @@ public final class RawImageRenderer {
     }
 
     /// Renders a preview downscaled to fit within `maxPixelSize` on its longest side.
-    public func renderPreview(params: RawEditParameters, maxPixelSize: CGFloat) -> CGImage? {
+    ///
+    /// Sets `CIRAWFilter.scaleFactor` so the demosaic itself runs at roughly preview resolution
+    /// instead of the RAW's full native size — on a 40-60MP sensor that's the difference between
+    /// decoding ~1600px and ~8000px on the long side, and every downstream kernel (FilmicRGB,
+    /// ColorBalanceRGB, ColorZones, RGBCurve) inherits the same reduction since they run after
+    /// this. `draft` additionally trades a bit of demosaic quality for speed — pass `true` while
+    /// the user is actively dragging a control, `false` once input has settled for a crisper pass.
+    public func renderPreview(params: RawEditParameters, maxPixelSize: CGFloat, draft: Bool = false) -> CGImage? {
         guard let filter else { return nil }
         apply(params)
+        let longestNative = max(nativeSize.width, nativeSize.height)
+        filter.scaleFactor = longestNative > 0 ? Float(min(1, maxPixelSize / longestNative)) : 1
+        filter.isDraftModeEnabled = draft
         guard var output = filter.outputImage else { return nil }
         if let filmicRGB = params.filmicRGB {
             output = FilmicRGBKernel.apply(to: output, params: filmicRGB)
         }
         if let colorBalanceRGB = params.colorBalanceRGB {
             output = ColorBalanceRGBKernel.apply(to: output, params: colorBalanceRGB)
+        }
+        if let colorZones = params.colorZones {
+            output = ColorZonesKernel.apply(to: output, params: colorZones)
+        }
+        if let rgbCurve = params.rgbCurve {
+            output = RGBCurveKernel.apply(to: output, params: rgbCurve)
         }
         let extent = output.extent
         let longestSide = max(extent.width, extent.height)
@@ -76,12 +92,20 @@ public final class RawImageRenderer {
     public func renderFullResolution(params: RawEditParameters) -> CGImage? {
         guard let filter else { return nil }
         apply(params)
+        filter.scaleFactor = 1
+        filter.isDraftModeEnabled = false
         guard var output = filter.outputImage else { return nil }
         if let filmicRGB = params.filmicRGB {
             output = FilmicRGBKernel.apply(to: output, params: filmicRGB)
         }
         if let colorBalanceRGB = params.colorBalanceRGB {
             output = ColorBalanceRGBKernel.apply(to: output, params: colorBalanceRGB)
+        }
+        if let colorZones = params.colorZones {
+            output = ColorZonesKernel.apply(to: output, params: colorZones)
+        }
+        if let rgbCurve = params.rgbCurve {
+            output = RGBCurveKernel.apply(to: output, params: rgbCurve)
         }
         return context.createCGImage(output, from: output.extent)
     }

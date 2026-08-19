@@ -15,6 +15,13 @@ public struct RawEditParameters: Equatable, Sendable {
     /// scene-referred pipeline grades color on the already-tonemapped result (see
     /// `ColorBalanceRGBParameters`).
     public var colorBalanceRGB: ColorBalanceRGBParameters?
+    /// `nil` means "no color zones EQ". Applied after `colorBalanceRGB` — grouped with it as the
+    /// two hue-driven grading tools, both ahead of the final tone curve (see
+    /// `ColorZonesParameters`).
+    public var colorZones: ColorZonesParameters?
+    /// `nil` means "no RGB curve". Applied last — the final tonal shaping pass, matching where a
+    /// Lightroom-style tone curve sits in most editors (see `RGBCurveParameters`).
+    public var rgbCurve: RGBCurveParameters?
 
     public init(
         exposure: Double? = nil,
@@ -23,7 +30,9 @@ public struct RawEditParameters: Equatable, Sendable {
         neutralTint: Double? = nil,
         sharpnessAmount: Double? = nil,
         filmicRGB: FilmicRGBParameters? = nil,
-        colorBalanceRGB: ColorBalanceRGBParameters? = nil
+        colorBalanceRGB: ColorBalanceRGBParameters? = nil,
+        colorZones: ColorZonesParameters? = nil,
+        rgbCurve: RGBCurveParameters? = nil
     ) {
         self.exposure = exposure
         self.boostAmount = boostAmount
@@ -32,6 +41,8 @@ public struct RawEditParameters: Equatable, Sendable {
         self.sharpnessAmount = sharpnessAmount
         self.filmicRGB = filmicRGB
         self.colorBalanceRGB = colorBalanceRGB
+        self.colorZones = colorZones
+        self.rgbCurve = rgbCurve
     }
 
     public static let none = RawEditParameters()

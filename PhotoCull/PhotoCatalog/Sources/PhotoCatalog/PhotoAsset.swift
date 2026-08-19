@@ -31,10 +31,12 @@ public final class PhotoAsset {
     public var editNeutralTint: Double?
     public var editSharpnessAmount: Double?
 
-    /// Filmic RGB tone curve (Phase 3). `editFilmicEnabled` gates the whole module — when
-    /// false, RawEngine skips it entirely and rendering is identical to Phase 2. The individual
-    /// `nil` fields fall back to darktable's shipped defaults (see `FilmicRGBParameters`).
-    public var editFilmicEnabled: Bool = false
+    /// Filmic RGB tone curve (Phase 3). Unlike Color Balance RGB / RGB Curve, darktable's
+    /// default Filmic curve is *not* a no-op — it actively remaps tone, which is the point of
+    /// the module — so this one keeps a real bypass switch (default on, matching the "most of
+    /// the time I leave it at default" usage the toggle was added for). The individual `nil`
+    /// fields fall back to darktable's shipped defaults (see `FilmicRGBParameters`).
+    public var editFilmicEnabled: Bool = true
     public var editFilmicWhitePointSource: Double?
     public var editFilmicBlackPointSource: Double?
     public var editFilmicContrast: Double?
@@ -42,11 +44,12 @@ public final class PhotoAsset {
     public var editFilmicSaturation: Double?
     public var editFilmicBalance: Double?
 
-    /// Color balance RGB — the 3-way (+global) color wheels (Phase 4). `editColorBalanceEnabled`
-    /// gates the whole module, same pattern as `editFilmicEnabled`. Each wheel is luminance (Y),
+    /// Color balance RGB — the 3-way (+global) color wheels (Phase 4). Bypass switch, same
+    /// purpose as `editFilmicEnabled`: skips the module's `CIColorKernel` pass entirely when off,
+    /// rather than running it at its (numerically no-op) defaults. Each wheel is luminance (Y),
     /// chroma (C), hue (H); `nil` falls back to darktable's neutral defaults (see
     /// `ColorBalanceRGBParameters`).
-    public var editColorBalanceEnabled: Bool = false
+    public var editColorBalanceEnabled: Bool = true
     public var editColorBalanceGlobalY: Double?
     public var editColorBalanceGlobalC: Double?
     public var editColorBalanceGlobalH: Double?
@@ -62,6 +65,24 @@ public final class PhotoAsset {
     public var editColorBalanceContrast: Double?
     public var editColorBalanceVibrance: Double?
     public var editColorBalanceChromaGlobal: Double?
+
+    /// RGB tone curve. Bypass switch, same purpose as `editFilmicEnabled`. Points are stored
+    /// flat-interleaved (`[x0, y0, x1, y1, ...]`, sorted by x) rather than as `[CGPoint]`/a custom
+    /// struct array — SwiftData round-trips `[Double]` natively without needing a
+    /// `Codable`/`Transformable` attribute. `nil`/fewer-than-2-points falls back to
+    /// `RGBCurveParameters.identityPoints` (see `RGBCurveParameters`).
+    public var editRGBCurveEnabled: Bool = true
+    public var editRGBCurvePoints: [Double]?
+    /// `nil` falls back to darktable's default (luminance-preserving).
+    public var editRGBCurvePreserveColors: Bool?
+
+    /// Color zones EQ — lightness/chroma/hue vs. hue. Bypass switch, same purpose as
+    /// `editFilmicEnabled`; all 3 curves default to a flat no-op (see `ColorZonesParameters`).
+    /// Same flat-interleaved storage convention as `editRGBCurvePoints`.
+    public var editColorZonesEnabled: Bool = true
+    public var editColorZonesLightnessPoints: [Double]?
+    public var editColorZonesChromaPoints: [Double]?
+    public var editColorZonesHuePoints: [Double]?
 
     public var rating: Int {
         get { ratingRaw }
