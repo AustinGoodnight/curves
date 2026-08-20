@@ -1,0 +1,296 @@
+import SwiftUI
+import SwiftData
+import PhotoCatalog
+
+/// Everything about the currently-browsed/edited photo set that changes on *every click or arrow
+/// key press* — selection, the open editor, filters, sort, and the alerts/sheets those drive.
+///
+/// This used to all be plain `@State` directly on `ContentView`. That was the real cause of the
+/// "selecting a photo is laggy" bug — `@State` invalidation always invalidates the *entire* view
+/// that declares it, not just the part that visually changed. With `selection` living on
+/// `ContentView`, every single click forced `ContentView.body` to re-run in full, which meant
+/// re-diffing/reconciling the *whole* `NavigationSplitView` — sidebar, split-view layout, and
+/// macOS window toolbar — on every click, measured at ~180-200ms fixed cost *regardless of
+/// library size*.
+///
+/// The fix: pull all of this into an `@Observable` reference type, owned by `ContentView` via
+/// `@State private var detailStore = DetailStore()` (so the instance itself is stable across
+/// `ContentView.body` re-runs) and handed to child views to read/write. Swift's Observation
+/// framework tracks dependencies per property *read*, not per object reference — as long as
+/// `ContentView.body` itself never reads a `detailStore.x` property's *value* (only forwards
+/// `Binding`s to it, or the object reference itself, to children), changing `selection` only
+/// invalidates whichever view's body actually read `selection` last.
+///
+/// **A second, harder-to-see trap lives one level up from this, in `ContentView.body` itself: see
+/// its doc comment on why `@Query var allAssets` must never be read — not even just to pass as a
+/// value parameter — anywhere that isn't gated behind `editingAsset == nil`.** That one cost a
+/// full extra investigation to find: `.equatable()`/state-extraction here were never the problem;
+/// an *unconditional* `allAssets` read elsewhere in `ContentView.body` was.
+@Observable
+final class DetailStore {
+    var selection: Set<UUID> = []
+    var editingAsset: PhotoAsset?
+    var gridMode: GridMode = .sessions
+    var ratingFilter: Int = 0
+    var flagFilter: FlagState?
+    var sortOption: SortOption = .captureDateDesc
+    var refreshTrigger = 0
+    /// Which stacks are shown expanded (all members visible) vs collapsed (one cover cell) — used
+    /// only by `rebuildDisplayItems()`. Not local `@State` on `CullingGridView` — it needs to live
+    /// where the (untracked) rebuild function lives.
+    var expandedStacks: Set<UUID> = []
+
+    var isShowingNewSceneAlert = false
+    var newSceneName = ""
+    var addSelectionToNewScene = false
+    var newSceneSession: Session?
+    var isShowingScenePicker = false
+    var quickSceneName = ""
+
+    /// The single session shared by every currently-selected asset, or `nil` if the selection is
+    /// empty or spans more than one session — see `refreshSelectionDerivedState`.
+    var commonSessionForSelection: Session?
+    var scenesInCommonSession: [PhotoScene] = []
+
+    /// Cached, not computed — call only from `ContentView`'s `.onChange(of: selection)`/
+    /// `.onChange(of: editingAsset)`.
+    func refreshSelectionDerivedState(allAssets: [PhotoAsset], scenes: [PhotoScene]) {
+        guard editingAsset == nil, !selection.isEmpty else {
+            commonSessionForSelection = nil
+            scenesInCommonSession = []
+            return
+        }
+        let selected = allAssets.filter { selection.contains($0.id) }
+        guard let first = selected.first?.session, selected.allSatisfy({ $0.session?.id == first.id }) else {
+            commonSessionForSelection = nil
+            scenesInCommonSession = []
+            return
+        }
+        commonSessionForSelection = first
+        scenesInCommonSession = scenes.filter { $0.session?.id == first.id }
+    }
+
+    /// Cached, not computed. Callable from `ContentView`'s own mutation functions, since those
+    /// mutate `allAssets` in ways that can change the answer.
+    func refreshFilteredAssets(allAssets: [PhotoAsset], selectedScene: PhotoScene?, selectedSession: Session?) {
+        var result = allAssets
+        if let selectedScene {
+            result = result.filter { $0.scene?.id == selectedScene.id }
+        } else if let selectedSession {
+            result = result.filter { $0.session?.id == selectedSession.id }
+        }
+        if ratingFilter > 0 {
+            result = result.filter { $0.rating >= ratingFilter }
+        }
+        if let flagFilter {
+            result = result.filter { $0.flag == flagFilter }
+        }
+        switch sortOption {
+        case .captureDateDesc:
+            result.sort { ($0.captureDate ?? $0.importDate) > ($1.captureDate ?? $1.importDate) }
+        case .captureDateAsc:
+            result.sort { ($0.captureDate ?? $0.importDate) < ($1.captureDate ?? $1.importDate) }
+        case .ratingDesc:
+            result.sort { $0.rating > $1.rating }
+        case .fileName:
+            result.sort { $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending }
+        }
+        filteredAssets = result
+        rebuildDisplayItems()
+    }
+
+    var filteredAssets: [PhotoAsset] = []
+
+    /// The grid's actual render list — one entry per visible cell (a single photo, a collapsed
+    /// stack cover, or one expanded stack member). Built here, in an ordinary (non-`View`,
+    /// non-tracked) method, rather than as a computed property read inside `CullingGridView.body`.
+    /// Building this touches `.stack`/`.id`/`.photos` on every asset in the current filter, and
+    /// since `@Model` types participate in Swift's Observation framework, doing that *inside a
+    /// tracked `body`* would register `CullingGridView` as a dependent of every one of those
+    /// objects' properties — thousands of dependency edges on a real library, rebuilt on every
+    /// render. Building the list here means `CullingGridView` depends on exactly one thing — this
+    /// array's value — nothing more.
+    var displayItems: [DisplayItem] = []
+
+    func rebuildDisplayItems() {
+        let assetIDs = Set(filteredAssets.map(\.id))
+        var seenStacks = Set<UUID>()
+        var items: [DisplayItem] = []
+        for asset in filteredAssets {
+            if let stack = asset.stack {
+                guard !seenStacks.contains(stack.id) else { continue }
+                seenStacks.insert(stack.id)
+                let visibleMembers = (stack.photos ?? [])
+                    .filter { assetIDs.contains($0.id) }
+                    .sorted { ($0.captureDate ?? $0.importDate) < ($1.captureDate ?? $1.importDate) }
+                guard let cover = visibleMembers.first else { continue }
+                if expandedStacks.contains(stack.id) {
+                    let total = visibleMembers.count
+                    for (index, member) in visibleMembers.enumerated() {
+                        items.append(.stackMember(member, position: index + 1, total: total))
+                    }
+                } else {
+                    items.append(.stackCover(stack, cover: cover, count: visibleMembers.count))
+                }
+            } else {
+                items.append(.single(asset))
+            }
+        }
+        displayItems = items
+    }
+
+    func setStackExpanded(_ stackID: UUID, expanded: Bool) {
+        if expanded {
+            expandedStacks.insert(stackID)
+        } else {
+            expandedStacks.remove(stackID)
+        }
+        rebuildDisplayItems()
+    }
+}
+
+enum DisplayItem: Identifiable {
+    case single(PhotoAsset)
+    case stackCover(PhotoStack, cover: PhotoAsset, count: Int)
+    case stackMember(PhotoAsset, position: Int, total: Int)
+
+    var id: String {
+        switch self {
+        case .single(let asset): return "single-\(asset.id)"
+        case .stackCover(let stack, _, _): return "cover-\(stack.id)"
+        case .stackMember(let asset, _, _): return "member-\(asset.id)"
+        }
+    }
+}
+
+enum SortOption: String, CaseIterable, Identifiable {
+    case captureDateDesc = "Newest First"
+    case captureDateAsc = "Oldest First"
+    case ratingDesc = "Highest Rated"
+    case fileName = "File Name"
+    var id: String { rawValue }
+}
+
+/// "Sessions": a click selects, for rating/flagging/stacking/scene-assigning. "Edit": a click
+/// opens the editor immediately, one photo at a time. See `CullingGridView.isEditMode`'s doc
+/// comment for the tradeoff between the two.
+enum GridMode: String, CaseIterable, Identifiable {
+    case sessions = "Sessions"
+    case edit = "Edit"
+    var id: String { rawValue }
+}
+
+/// Just the grid itself (plus its "no photos"/"no matches" overlay) — deliberately *not* the
+/// `NavigationStack`/toolbar/`.navigationDestination` that wraps it in `ContentView`, and
+/// deliberately constructed *only* when `ContentView.body` has already confirmed
+/// `editingAsset == nil` (see that gating at this view's call site in `ContentView.body`, not
+/// inside this view's own `body` — that distinction is load-bearing, see `ContentView`'s doc
+/// comment). `Equatable`, comparing `allAssets` (SwiftData's identity-based equality — same
+/// objects, not field values) and `store`'s reference identity, is what lets `.equatable()` at the
+/// call site skip re-invoking this `body` when nothing it actually reads has changed — e.g. when
+/// `ContentView.body` reruns for reasons that have nothing to do with the grid.
+struct GridPane: View, Equatable {
+    let allAssets: [PhotoAsset]
+    /// Not used for rendering — `store.filteredAssets`/`store.displayItems` are already filtered
+    /// by these — only to rebuild correctly (respecting the active scene/session filter) from
+    /// `onDataChanged`, when a rating/flag keyboard shortcut mutates an asset directly.
+    let selectedScene: PhotoScene?
+    let selectedSession: Session?
+    @Bindable var store: DetailStore
+    var onGroupStack: () -> Void
+    var onUnstack: () -> Void
+    var onOpenEditor: (PhotoAsset) -> Void
+
+    static func == (lhs: GridPane, rhs: GridPane) -> Bool {
+        lhs.allAssets == rhs.allAssets && lhs.selectedScene == rhs.selectedScene
+            && lhs.selectedSession == rhs.selectedSession && lhs.store === rhs.store
+    }
+
+    var body: some View {
+        CullingGridView(
+            assets: store.filteredAssets,
+            displayItems: store.displayItems,
+            selection: $store.selection,
+            isEditMode: store.gridMode == .edit,
+            onGroupStack: onGroupStack,
+            onUnstack: onUnstack,
+            onOpenEditor: onOpenEditor,
+            onDataChanged: { store.refreshFilteredAssets(allAssets: allAssets, selectedScene: selectedScene, selectedSession: selectedSession) },
+            onToggleStack: { id, expand in store.setStackExpanded(id, expanded: expand) }
+        )
+        .overlay {
+            if allAssets.isEmpty {
+                ContentUnavailableView(
+                    "No Photos",
+                    systemImage: "photo.on.rectangle.angled",
+                    description: Text("Import a folder of RAW files to get started.")
+                )
+            } else if store.filteredAssets.isEmpty {
+                ContentUnavailableView(
+                    "No Matches",
+                    systemImage: "line.3.horizontal.decrease.circle",
+                    description: Text("No photos match the current filter.")
+                )
+            }
+        }
+    }
+}
+
+/// Pulled out of `ContentView.toolbarContent` on purpose — it's one of two toolbar items
+/// (alongside `OrganizeMenu`) that read a `store` property as a *value* (`store.selection.count`)
+/// rather than just forwarding a `Binding`. As its own `View`, only *this* small view's `body`
+/// re-runs when `store.selection` changes. `onEdit` is a closure, not `allAssets` as a separate
+/// value parameter — see `DetailStore`'s doc comment on why passing `allAssets` down as a value
+/// (forcing a read of it at *construction* time) is the trap this avoids.
+struct EditButton: View {
+    @Bindable var store: DetailStore
+    var onEdit: () -> Void
+
+    var body: some View {
+        Button {
+            onEdit()
+        } label: {
+            Label("Edit…", systemImage: "slider.horizontal.3")
+        }
+        .disabled(store.selection.count != 1)
+    }
+}
+
+/// Pulled out of `ContentView.toolbarContent` on purpose — it's the only piece of the toolbar
+/// that reads `store.commonSessionForSelection`/`store.scenesInCommonSession`, and those are
+/// mutated a beat *after* `store.selection` itself, via `refreshSelectionDerivedState()` running
+/// from `ContentView`'s `.onChange(of: store.selection)`. As its own `View`, only *this* small
+/// view's `body` re-runs when those two properties change.
+struct OrganizeMenu: View {
+    @Bindable var store: DetailStore
+    let selectedScene: PhotoScene?
+    var onGroupStack: () -> Void
+    var onUnstack: () -> Void
+    var onAddSelected: (PhotoScene) -> Void
+    var onNewScene: () -> Void
+    var onRemoveFromScene: () -> Void
+
+    var body: some View {
+        Menu {
+            Button("Group Selected into Stack (G)") { onGroupStack() }
+                .disabled(store.selection.count < 2)
+            Button("Unstack Selected (⇧G)") { onUnstack() }
+                .disabled(store.selection.isEmpty)
+            Divider()
+            Menu("Add Selected to Scene") {
+                ForEach(store.scenesInCommonSession) { scene in
+                    Button(scene.name) { onAddSelected(scene) }
+                }
+                if !store.scenesInCommonSession.isEmpty { Divider() }
+                Button("New Scene…") { onNewScene() }
+            }
+            .disabled(store.commonSessionForSelection == nil)
+            if selectedScene != nil {
+                Button("Remove Selected from This Scene") { onRemoveFromScene() }
+                    .disabled(store.selection.isEmpty)
+            }
+        } label: {
+            Label("Organize", systemImage: "square.stack.3d.up")
+        }
+    }
+}

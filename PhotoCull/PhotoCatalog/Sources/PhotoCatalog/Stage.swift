@@ -4,7 +4,9 @@ import SwiftData
 /// Which of the three (eventually four, once masking lands) roles a `Stage` plays. `.single` and
 /// `.scene` are structural — every `PhotoAsset`/`PhotoScene` has exactly one, created alongside
 /// its owner and never deleted or renamed. `.custom` stages are freely added/removed/renamed by
-/// the user.
+/// the user. A stack doesn't get its own kind — see `PhotoStack.stages`'s doc comment for why a
+/// stacked photo's `.single`/`.custom` stages are the *same kind*, just owned by the stack instead
+/// of the asset.
 public enum StageKind: Int, Codable, Sendable {
     case single = 0
     case scene = 1
@@ -18,9 +20,12 @@ public enum StageKind: Int, Codable, Sendable {
 /// Selecting a stage in the editor only changes which stage's own values the controls show
 /// ("blank slate" editing); it never changes what's rendered.
 ///
-/// Exactly one of `asset`/`scene` is set: `.single`/`.custom` stages are owned by a `PhotoAsset`
-/// (`asset`), the one shared `.scene` stage is owned by a `PhotoScene` (`scene`) and applies to
-/// every photo in it.
+/// Exactly one of `asset`/`scene`/`stack` is set: an unstacked photo's own `.single`/`.custom`
+/// stages are owned by its `PhotoAsset` (`asset`); a *stacked* photo's `.single`/`.custom` stages
+/// are instead owned by its `PhotoStack` (`stack`) and shared with every other photo in that stack
+/// — see `PhotoStack.stages`'s and `PhotoAsset.singleStage`'s doc comments. The one shared `.scene`
+/// stage is owned by a `PhotoScene` (`scene`) and applies to every photo in it, independently of
+/// stacking.
 ///
 /// Holds the four *stackable* kernel-module parameter groups that used to live directly on
 /// `PhotoAsset` (Filmic RGB, Color Balance RGB, RGB Curve, Color Zones) — see each field's doc
@@ -41,6 +46,7 @@ public final class Stage {
 
     public var asset: PhotoAsset?
     public var scene: PhotoScene?
+    public var stack: PhotoStack?
 
     /// Reserved for future region/brush masking — `nil` means the stage applies to the whole
     /// image, matching every other module's "nil = no-op" convention in this codebase.
@@ -85,7 +91,10 @@ public final class Stage {
         set { kindRaw = newValue.rawValue }
     }
 
-    public init(kind: StageKind, name: String, asset: PhotoAsset? = nil, scene: PhotoScene? = nil, sortIndex: Int = 0) {
+    public init(
+        kind: StageKind, name: String, asset: PhotoAsset? = nil, scene: PhotoScene? = nil, stack: PhotoStack? = nil,
+        sortIndex: Int = 0
+    ) {
         self.id = UUID()
         self.name = name
         self.kindRaw = kind.rawValue
@@ -94,5 +103,6 @@ public final class Stage {
         self.sortIndex = sortIndex
         self.asset = asset
         self.scene = scene
+        self.stack = stack
     }
 }

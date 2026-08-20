@@ -10,8 +10,11 @@ import RawEngine
 /// `EditorRenderCoordinator`'s doc comment for the full story on why that split exists.
 struct EditorView: View {
     let asset: PhotoAsset
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
+    /// Threaded down to `SessionFilmstripView` and `StagesSidebarView`'s "Stack" section — both let
+    /// you jump to a different photo without leaving the editor. `ContentView` passes its own
+    /// `openEditor(for:)` here, the same function the grid uses, so switching photos from either
+    /// filmstrip behaves identically to opening one from the grid.
+    var onSelectAsset: (PhotoAsset) -> Void
 
     @State private var coordinator = EditorRenderCoordinator()
     /// Which stage's own values the controls currently show ("blank slate" editing — see
@@ -26,8 +29,9 @@ struct EditorView: View {
     /// refresh — those still read fresh off the `Stage` objects already in this array.
     @State private var activeStages: [Stage]
 
-    init(asset: PhotoAsset) {
+    init(asset: PhotoAsset, onSelectAsset: @escaping (PhotoAsset) -> Void) {
         self.asset = asset
+        self.onSelectAsset = onSelectAsset
         let single = asset.singleStage
         _selectedStage = State(initialValue: single)
         _activeStages = State(initialValue: activeStageStack(for: asset))
@@ -36,8 +40,11 @@ struct EditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
+                SessionFilmstripView(asset: asset, onSelectAsset: onSelectAsset)
+
                 StagesSidebarView(
-                    asset: asset, selectedStage: $selectedStage, activeStages: $activeStages, coordinator: coordinator
+                    asset: asset, selectedStage: $selectedStage, activeStages: $activeStages, coordinator: coordinator,
+                    onSelectAsset: onSelectAsset
                 )
                 .frame(minWidth: 160, idealWidth: 200, maxWidth: 280)
 
@@ -66,15 +73,6 @@ struct EditorView: View {
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle(asset.fileName)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") {
-                    try? modelContext.save()
-                    dismiss()
-                }
-            }
-        }
         .task(id: asset.filePath) {
             await coordinator.loadAndRender(
                 url: asset.resolvedURL(),

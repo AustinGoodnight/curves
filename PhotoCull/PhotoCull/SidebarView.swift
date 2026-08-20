@@ -1,13 +1,18 @@
 import SwiftUI
 import PhotoCatalog
 
-struct SidebarView: View {
+struct SidebarView: View, Equatable {
     let sessions: [Session]
     let scenes: [PhotoScene]
     @Binding var selectedSession: Session?
     @Binding var selectedScene: PhotoScene?
     var onNewScene: (Session) -> Void
     var onDeleteScene: (PhotoScene) -> Void
+
+    static func == (lhs: SidebarView, rhs: SidebarView) -> Bool {
+        lhs.sessions == rhs.sessions && lhs.scenes == rhs.scenes
+            && lhs.selectedSession == rhs.selectedSession && lhs.selectedScene == rhs.selectedScene
+    }
 
     var body: some View {
         List {

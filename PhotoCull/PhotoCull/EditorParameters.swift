@@ -108,7 +108,10 @@ func stageParameters(for stage: Stage) -> StageParameters {
 /// The full set of stages that contribute to this asset's rendered image, in the fixed
 /// Scene → Single → Custom order, filtered to enabled stages. Selecting a different stage for
 /// *editing* (`EditorView.selectedStage`) never changes this — the render always composites every
-/// active stage regardless of which one's controls are currently shown.
+/// active stage regardless of which one's controls are currently shown. No separate step for
+/// stacking: `asset.singleStage`/`.customStages` already resolve to the stack's shared stages when
+/// `asset.stack` is set (see `PhotoAsset.singleStage`'s doc comment), so this reads the same either
+/// way.
 func activeStageStack(for asset: PhotoAsset) -> [Stage] {
     var stack: [Stage] = []
     if let sceneStage = asset.scene?.stage {

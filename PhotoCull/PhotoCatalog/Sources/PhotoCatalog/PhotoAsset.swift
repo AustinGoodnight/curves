@@ -40,16 +40,23 @@ public final class PhotoAsset {
     public var stages: [Stage]? = []
 
     /// The always-present, per-photo stage — created alongside this asset in `init` and never
-    /// deleted or renamed. The `??` fallback only matters for assets that predate the `Stage`
-    /// model and haven't been migrated yet; it deliberately returns a transient, unpersisted
-    /// `Stage` rather than crashing.
+    /// deleted or renamed. **Routed to `stack.singleStage` instead whenever `stack` is set**: a
+    /// stacked photo doesn't get its own independent `Single` — every photo in the stack shares
+    /// exactly the one on `PhotoStack`, so editing any one of them edits all of them identically.
+    /// See `PhotoStack.stages`'s doc comment. Falls back to this asset's own stage only when
+    /// unstacked (or, defensively, if the stack is somehow missing its shared stage). The final
+    /// `??` fallback only matters for assets that predate the `Stage` model and haven't been
+    /// migrated yet; it deliberately returns a transient, unpersisted `Stage` rather than crashing.
     public var singleStage: Stage {
-        stages?.first(where: { $0.kind == .single }) ?? Stage(kind: .single, name: "Single", asset: self)
+        if let stack, let shared = stack.singleStage { return shared }
+        return stages?.first(where: { $0.kind == .single }) ?? Stage(kind: .single, name: "Single", asset: self)
     }
 
-    /// User-added stages, in display/composite order.
+    /// User-added stages, in display/composite order. Routed to `stack.customStages` whenever
+    /// `stack` is set — same sharing as `singleStage`, see its doc comment.
     public var customStages: [Stage] {
-        (stages ?? []).filter { $0.kind == .custom }.sorted { $0.sortIndex < $1.sortIndex }
+        if let stack { return stack.customStages }
+        return (stages ?? []).filter { $0.kind == .custom }.sorted { $0.sortIndex < $1.sortIndex }
     }
 
     public var rating: Int {

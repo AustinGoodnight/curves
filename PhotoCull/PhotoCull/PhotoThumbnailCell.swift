@@ -112,7 +112,7 @@ struct PhotoThumbnailCell: View {
             .overlay(alignment: .topLeading) { colorDot }
             .overlay(alignment: .bottomLeading) { stackBadgeView }
             .overlay(alignment: .topTrailing) { sceneNameLabel }
-            .overlay { editButton }
+            .overlay(alignment: .topTrailing) { editButton }
             .onHover { isHovering = $0 }
 
             HStack(spacing: 2) {
@@ -254,16 +254,21 @@ struct PhotoThumbnailCell: View {
 
     /// Opening a photo is this hover-revealed button, never the cell's own click — see
     /// `CullingGridView.cell(for:at:)`'s doc comment for why a click only ever selects now.
+    /// Pinned to the top-right corner alongside `flagBadge` (also top-trailing) — offset further
+    /// right when a flag badge is actually showing so the two don't overlap; `sceneNameLabel`
+    /// lives in the same corner too but is pushed down 26pt, well clear of this row.
     @ViewBuilder private var editButton: some View {
         if isHovering, let onOpenEditor {
             Button(action: onOpenEditor) {
                 Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
-                    .padding(10)
+                    .padding(8)
                     .background(.black.opacity(0.45), in: Circle())
             }
             .buttonStyle(.plain)
+            .padding(.top, 4)
+            .padding(.trailing, asset.flag == .none ? 4 : 34)
         }
     }
 

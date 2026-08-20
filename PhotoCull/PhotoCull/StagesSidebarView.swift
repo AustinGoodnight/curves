@@ -6,7 +6,9 @@ import PhotoCatalog
 /// (always present), then any Custom stages. Selecting a row only changes which stage's own
 /// values `EditorSidebarView`/`ColorBalanceBarView` show ("blank slate" editing); the enabled
 /// toggle controls whether a stage contributes to the composited render at all. See `Stage`'s doc
-/// comment for the full model.
+/// comment for the full model. When `asset` is stacked, "Single" and every custom stage shown here
+/// are shared with the rest of the stack (`PhotoStack.stages`) — editing them here edits every
+/// stacked photo identically; there's no separate "this photo only" layer while stacked.
 struct StagesSidebarView: View {
     let asset: PhotoAsset
     @Binding var selectedStage: Stage
@@ -16,10 +18,22 @@ struct StagesSidebarView: View {
     /// doesn't change which stages are active.
     @Binding var activeStages: [Stage]
     let coordinator: EditorRenderCoordinator
+    /// Lets a row in the "Stack" section below switch the editor to that photo — see
+    /// `EditorView.onSelectAsset`'s doc comment.
+    var onSelectAsset: (PhotoAsset) -> Void
     @Environment(\.modelContext) private var modelContext
 
     @State private var renamingStage: Stage?
     @State private var renameText = ""
+
+    /// Every photo in this asset's stack, `asset` itself included, in capture order — so the
+    /// section shows the full stack with the currently-open one marked, not just "everything else".
+    /// Empty (hiding the whole "Stack" section) when this photo isn't stacked with anything, or its
+    /// stack has no other members.
+    private var stackedPhotos: [PhotoAsset] {
+        guard let stack = asset.stack, (stack.photos ?? []).count > 1 else { return [] }
+        return (stack.photos ?? []).sorted { ($0.captureDate ?? $0.importDate) < ($1.captureDate ?? $1.importDate) }
+    }
 
     var body: some View {
         List {
@@ -27,6 +41,9 @@ struct StagesSidebarView: View {
                 if let sceneStage = asset.scene?.stage {
                     row(for: sceneStage, title: asset.scene.map { "Scene: \($0.name)" } ?? "Scene")
                 }
+                // When `asset` is stacked, `singleStage`/`customStages` are already the *shared*
+                // ones from `asset.stack` (see `PhotoAsset.singleStage`'s doc comment) — so this
+                // row and the `ForEach` below need no special-casing to show/edit them.
                 row(for: asset.singleStage, title: "Single")
                 ForEach(asset.customStages) { stage in
                     row(for: stage, title: stage.name)
@@ -43,6 +60,28 @@ struct StagesSidebarView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
+            if !stackedPhotos.isEmpty {
+                Section("Stack") {
+                    ForEach(stackedPhotos) { photo in
+                        let isCurrent = photo.id == asset.id
+                        HStack(spacing: 8) {
+                            CompactPhotoThumbnail(asset: photo, isCurrent: isCurrent, size: 36)
+                            Text(photo.fileName)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundStyle(.primary)
+                            if isCurrent {
+                                Spacer()
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { if !isCurrent { onSelectAsset(photo) } }
+                        .listRowBackground(isCurrent ? Color.accentColor.opacity(0.2) : Color.clear)
+                    }
+                }
+            }
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
@@ -84,10 +123,17 @@ struct StagesSidebarView: View {
     }
 
     /// Custom stages start with nothing set on any of the four kernel modules — a genuine blank
-    /// slate, not a copy of whatever's currently selected.
+    /// slate, not a copy of whatever's currently selected. Owned by `asset.stack` instead of
+    /// `asset` itself when stacked, so it's immediately shared with every other member — same
+    /// routing as `PhotoAsset.customStages` reads, just on the write side.
     private func addCustomStage() {
         let nextIndex = (asset.customStages.map(\.sortIndex).max() ?? -1) + 1
-        let stage = Stage(kind: .custom, name: "Custom \(nextIndex + 1)", asset: asset, sortIndex: nextIndex)
+        let stage: Stage
+        if let stack = asset.stack {
+            stage = Stage(kind: .custom, name: "Custom \(nextIndex + 1)", stack: stack, sortIndex: nextIndex)
+        } else {
+            stage = Stage(kind: .custom, name: "Custom \(nextIndex + 1)", asset: asset, sortIndex: nextIndex)
+        }
         modelContext.insert(stage)
         selectedStage = stage
         refreshAndRender()

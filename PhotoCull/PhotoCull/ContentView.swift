@@ -3,18 +3,31 @@ import SwiftData
 import AppKit
 import PhotoCatalog
 
-/// ⚠️ PERFORMANCE TRAP, hit three times now — see `CLAUDE.md` at the repo root for the full
-/// writeup. The short version: **never read an expensive computed property (anything that
-/// filters/scans `allAssets`/`scenes`/`sessions`) directly inside `body`/`toolbarContent`.** A
-/// computed property reruns on *every* re-render of this view, for any reason — `ContentView`
-/// stays mounted behind the pushed `EditorView` and reruns on every editor slider tick, and it
-/// obviously also reruns on every plain `selection` change while browsing the grid. Gating a
-/// computed property behind `editingAsset == nil` only patches the first trigger and leaves the
-/// second one just as slow (this was tried once and wasn't enough — see `CLAUDE.md`).
-///
-/// The actual fix, and the pattern to copy: cache the value in `@State` and recompute only from
-/// `.onChange(of:)` on its real inputs — see `commonSessionForSelection`/`scenesInCommonSession`/
-/// `refreshSelectionDerivedState()` below.
+/// ⚠️ PERFORMANCE TRAP — see `CLAUDE.md` at the repo root for the full writeup. Short version:
+/// 1. Never read an expensive computed property (anything that filters/scans `allAssets`/
+///    `scenes`/`sessions`) directly inside `body`/`toolbarContent`.
+/// 2. Never put frequently-mutated state (anything that changes on every click, like selection)
+///    directly on `ContentView`'s own `@State` — that's why it all lives on `DetailStore`
+///    (`DetailPaneView.swift`) instead, an `@Observable` object owned here but never read
+///    directly by *this* view's own `body` (only passed down), so Swift's Observation framework
+///    scopes click-driven invalidation to whichever small view actually reads each property.
+/// 3. **Reading `@Query var allAssets` — even just to pass it as a value parameter to a child
+///    view, never touching its contents — costs real time (~250ms measured on a 1708-asset
+///    library) on this SDK, independent of what's done with the value.** This is *not* about
+///    SwiftUI diffing, `.equatable()`, or Observation bookkeeping — a bisection down to a single
+///    inert, unused `@State var` proved those innocent. The actual mechanism: every editor slider
+///    tick writes to a `PhotoAsset`/`Stage` field, which makes `@Query` consider `allAssets`
+///    "possibly changed" and forces `ContentView.body` to re-run — and if *anything* in that body
+///    reads `allAssets`'s value unconditionally (not gated behind `editingAsset == nil`, and not
+///    deferred into a closure/action-handler that only runs on user interaction), that read alone
+///    pays the ~250ms cost, every tick, regardless of `.equatable()`/gating anywhere else. Two
+///    separate call sites did this and both had to be fixed: `GridPane(allAssets: allAssets, ...)`
+///    being constructed unconditionally (gating moved to wrap its *construction*, not just inside
+///    `GridPane.body`), and `EditButton` taking `allAssets` as a stored value parameter instead of
+///    a closure that captures it lazily. **Rule going forward: never pass `allAssets`/`scenes`/
+///    `sessions` as a plain value parameter to anything constructed on every `body` pass — gate the
+///    construction itself behind whatever makes it actually necessary, or hand over a closure that
+///    reads the property lazily, at the point it's actually used.**
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PhotoAsset.captureDate, order: .reverse) private var allAssets: [PhotoAsset]
@@ -23,184 +36,73 @@ struct ContentView: View {
 
     @State private var selectedScene: PhotoScene?
     @State private var selectedSession: Session?
-    @State private var selection: Set<UUID> = []
-    @State private var ratingFilter: Int = 0
-    @State private var flagFilter: FlagState?
-    @State private var sortOption: SortOption = .captureDateDesc
     @State private var importStatus: String?
-    @State private var isShowingNewSceneAlert = false
-    @State private var newSceneName = ""
-    @State private var addSelectionToNewScene = false
-    @State private var refreshTrigger = 0
-    @State private var editingAsset: PhotoAsset?
     @State private var isShowingSessionPicker = false
     @State private var pendingImportFiles: [URL] = []
     @State private var newSessionName = ""
-    @State private var newSceneSession: Session?
-    @State private var isShowingScenePicker = false
-    @State private var quickSceneName = ""
-    @State private var gridMode: GridMode = .sessions
 
-    enum SortOption: String, CaseIterable, Identifiable {
-        case captureDateDesc = "Newest First"
-        case captureDateAsc = "Oldest First"
-        case ratingDesc = "Highest Rated"
-        case fileName = "File Name"
-        var id: String { rawValue }
-    }
-
-    /// "Sessions": a click selects, for rating/flagging/stacking/scene-assigning. "Edit": a click
-    /// opens the editor immediately, one photo at a time. See `CullingGridView.isEditMode`'s doc
-    /// comment for the tradeoff between the two.
-    enum GridMode: String, CaseIterable, Identifiable {
-        case sessions = "Sessions"
-        case edit = "Edit"
-        var id: String { rawValue }
-    }
-
-    /// The single session shared by every currently-selected asset, or `nil` if the selection is
-    /// empty or spans more than one session. Scene assignment is scoped to one session at a time
-    /// (a scene lives inside exactly one session), so "Add Selected to Scene" needs this to know
-    /// which session's scenes to offer.
-    ///
-    /// **Cached `@State`, not a computed property** — read the warning at the top of this file.
-    /// This used to be a computed property read directly inside `toolbarContent`'s body, which
-    /// meant it re-ran `allAssets.filter(...)` (1000s of `PhotoAsset`s on a real library) on
-    /// *every* SwiftUI re-diff of `ContentView`, not just when the selection actually changed —
-    /// including every slider tick while the editor was open, and every single click while just
-    /// selecting photos in the grid. A guard for "skip while the editor is open" only patches one
-    /// of those triggers; caching removes the problem at the root by only recomputing on the one
-    /// event that can actually change the answer (`.onChange(of: selection)` /
-    /// `.onChange(of: editingAsset)`, wired in `body`).
-    @State private var commonSessionForSelection: Session?
-    /// Scenes in the session all selected assets share — refreshed alongside
-    /// `commonSessionForSelection` by the same `refreshSelectionDerivedState()` call.
-    @State private var scenesInCommonSession: [PhotoScene] = []
-
-    /// Recomputes `commonSessionForSelection`/`scenesInCommonSession` — call only from
-    /// `.onChange(of: selection)`/`.onChange(of: editingAsset)`, never from `body` itself (that's
-    /// the exact mistake this replaced; see the doc comment above).
-    private func refreshSelectionDerivedState() {
-        guard editingAsset == nil, !selection.isEmpty else {
-            commonSessionForSelection = nil
-            scenesInCommonSession = []
-            return
-        }
-        let selected = allAssets.filter { selection.contains($0.id) }
-        guard let first = selected.first?.session, selected.allSatisfy({ $0.session?.id == first.id }) else {
-            commonSessionForSelection = nil
-            scenesInCommonSession = []
-            return
-        }
-        commonSessionForSelection = first
-        scenesInCommonSession = scenes.filter { $0.session?.id == first.id }
-    }
-
-    private var filteredAssets: [PhotoAsset] {
-        var result = allAssets
-        if let selectedScene {
-            result = result.filter { $0.scene?.id == selectedScene.id }
-        } else if let selectedSession {
-            result = result.filter { $0.session?.id == selectedSession.id }
-        }
-        if ratingFilter > 0 {
-            result = result.filter { $0.rating >= ratingFilter }
-        }
-        if let flagFilter {
-            result = result.filter { $0.flag == flagFilter }
-        }
-        switch sortOption {
-        case .captureDateDesc:
-            result.sort { ($0.captureDate ?? $0.importDate) > ($1.captureDate ?? $1.importDate) }
-        case .captureDateAsc:
-            result.sort { ($0.captureDate ?? $0.importDate) < ($1.captureDate ?? $1.importDate) }
-        case .ratingDesc:
-            result.sort { $0.rating > $1.rating }
-        case .fileName:
-            result.sort { $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending }
-        }
-        return result
-    }
+    @State private var detailStore = DetailStore()
+    /// Collapsed to `.detailOnly` while editing — see `.onChange(of: detailStore.editingAsset)`
+    /// below. The Library/Sessions/Scenes list has nothing to do with editing a single photo, and
+    /// hiding it gives the editor's own `StagesSidebarView`/image/`EditorSidebarView` the full
+    /// window width. A manual toggle while editing (the sidebar button, ⌃⌘S) can still bring it
+    /// back — this only sets the *default*, it doesn't lock the column closed.
+    @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
             SidebarView(
                 sessions: sessions,
                 scenes: scenes,
                 selectedSession: $selectedSession,
                 selectedScene: $selectedScene,
                 onNewScene: { session in
-                    addSelectionToNewScene = false
-                    newSceneName = ""
-                    newSceneSession = session
-                    isShowingNewSceneAlert = true
+                    detailStore.addSelectionToNewScene = false
+                    detailStore.newSceneName = ""
+                    detailStore.newSceneSession = session
+                    detailStore.isShowingNewSceneAlert = true
                 },
                 onDeleteScene: deleteScene
             )
+            .equatable()
         } detail: {
-            NavigationStack {
-                // Gated on `editingAsset == nil` rather than always constructing the grid: this
-                // view is pushed via `navigationDestination` below, not presented modally, so
-                // `CullingGridView` stays mounted underneath the editor for back-navigation.
-                // `filteredAssets` re-filters/re-sorts the whole library and `CullingGridView`'s
-                // own `displayItems` redoes an O(n²)-ish stack-grouping pass — both uncached,
-                // both re-evaluated by SwiftUI's `@Query` on *any* tracked-property change to
-                // *any* fetched `PhotoAsset`, which includes every single edit made while the
-                // editor is open. On a real library that's expensive enough to stall the main
-                // thread for a few hundred ms per slider tick — this is what was actually behind
-                // "renders fine once you release, but does nothing while sliding": the render
-                // pipeline itself was never the bottleneck, this hidden background recompute was.
-                Group {
-                    if editingAsset == nil {
-                        CullingGridView(
-                            assets: filteredAssets,
-                            selection: $selection,
-                            isEditMode: gridMode == .edit,
-                            onGroupStack: groupSelectedIntoStack,
-                            onUnstack: unstackSelected,
-                            onOpenEditor: { editingAsset = $0 }
-                        )
-                        .id(refreshTrigger)
-                        .overlay {
-                            if allAssets.isEmpty {
-                                ContentUnavailableView(
-                                    "No Photos",
-                                    systemImage: "photo.on.rectangle.angled",
-                                    description: Text("Import a folder of RAW files to get started.")
-                                )
-                            } else if filteredAssets.isEmpty {
-                                ContentUnavailableView(
-                                    "No Matches",
-                                    systemImage: "line.3.horizontal.decrease.circle",
-                                    description: Text("No photos match the current filter.")
-                                )
-                            }
-                        }
-                    }
-                }
-                .navigationTitle(selectedScene?.name ?? selectedSession?.name ?? "PhotoCull")
-                .toolbar { toolbarContent }
-                .toolbarBackground(Color.sidebarBackground, for: .windowToolbar)
-                .toolbarBackground(.visible, for: .windowToolbar)
-                .navigationDestination(item: $editingAsset) { asset in
-                    EditorView(asset: asset)
+            // Grid and editor are swapped in place here rather than the editor being pushed via
+            // `navigationDestination` (as it used to be) — that let each screen have its own
+            // toolbar, which is exactly what made the Sessions/Edit toggle *not* persistent: it
+            // simply didn't exist on the editor's separate toolbar. One shared `toolbarContent`
+            // below, attached once, is what makes it persistent across both. `editingAsset == nil`
+            // still gates `GridPane`'s *construction* here, not just its body — see this file's
+            // header comment (trap #3) for why that distinction matters. `.id(editingAsset.id)` on
+            // the editor branch forces a fresh `EditorView` (fresh `@State` coordinator/stage) every
+            // time `editingAsset` changes — including a direct switch from one photo to another via
+            // `SessionFilmstripView`/`StagesSidebarView`'s "Stack" section, which never passes
+            // through `nil`. Without this, the `if`/`else` branch alone gives SwiftUI no reason to
+            // recreate the view for a same-branch identity change, and the coordinator/stage state
+            // from the *previous* photo would leak into the new one.
+            Group {
+                if let editingAsset = detailStore.editingAsset {
+                    EditorView(asset: editingAsset, onSelectAsset: openEditor)
+                        .id(editingAsset.id)
+                } else {
+                    GridPane(
+                        allAssets: allAssets, selectedScene: selectedScene, selectedSession: selectedSession,
+                        store: detailStore, onGroupStack: groupSelectedIntoStack, onUnstack: unstackSelected,
+                        onOpenEditor: openEditor
+                    )
+                    .equatable()
+                    .id(detailStore.refreshTrigger)
                 }
             }
+            .navigationTitle(detailStore.editingAsset?.fileName ?? selectedScene?.name ?? selectedSession?.name ?? "PhotoCull")
+            .toolbar { toolbarContent }
+            .toolbarBackground(Color.sidebarBackground, for: .windowToolbar)
+            .toolbarBackground(.visible, for: .windowToolbar)
         }
-        // ⌘S as a hidden `Button` + `.keyboardShortcut`, not a case in `CullingGridView`'s
-        // `onKeyPress` handler (where the rest of the grid's shortcuts live): AppKit routes
-        // Command-modified key combos through the menu bar's key-equivalent system *before* they
-        // ever reach a view's `onKeyPress`, so a Command chord typed there is unreliable — it
-        // depends on nothing else claiming the equivalent first, and in practice often just never
-        // arrives. `.keyboardShortcut` registers a real key equivalent the standard way and fires
-        // regardless of which view has focus, which is what a menu-adjacent shortcut like this
-        // needs anyway. No-ops harmlessly when there's no valid single-session selection to act on
-        // (`commonSessionForSelection` is `nil`, e.g. nothing selected or the editor is open).
         .background {
             Button("Add Selected to Scene") {
-                guard commonSessionForSelection != nil else { return }
-                quickSceneName = ""
-                isShowingScenePicker = true
+                guard detailStore.commonSessionForSelection != nil else { return }
+                detailStore.quickSceneName = ""
+                detailStore.isShowingScenePicker = true
             }
             .keyboardShortcut("s", modifiers: .command)
             .hidden()
@@ -213,10 +115,10 @@ struct ContentView: View {
         } message: { status in
             Text(status)
         }
-        .alert("New Scene", isPresented: $isShowingNewSceneAlert) {
-            TextField("Scene Name", text: $newSceneName)
-            Button("Cancel", role: .cancel) { newSceneName = ""; newSceneSession = nil }
-            Button("Create") { createScene(named: newSceneName, addSelection: addSelectionToNewScene) }
+        .alert("New Scene", isPresented: $detailStore.isShowingNewSceneAlert) {
+            TextField("Scene Name", text: $detailStore.newSceneName)
+            Button("Cancel", role: .cancel) { detailStore.newSceneName = ""; detailStore.newSceneSession = nil }
+            Button("Create") { createScene(named: detailStore.newSceneName, addSelection: detailStore.addSelectionToNewScene) }
         } message: {
             Text("Enter a name for the new scene.")
         }
@@ -245,31 +147,60 @@ struct ContentView: View {
                 }
             )
         }
-        .sheet(isPresented: $isShowingScenePicker) {
+        .sheet(isPresented: $detailStore.isShowingScenePicker) {
             ScenePickerSheet(
-                scenes: scenesInCommonSession,
-                newSceneName: $quickSceneName,
+                scenes: detailStore.scenesInCommonSession,
+                newSceneName: $detailStore.quickSceneName,
                 onPick: { scene in
                     addSelected(to: scene)
-                    isShowingScenePicker = false
+                    detailStore.isShowingScenePicker = false
                 },
                 onCreate: { name in quickCreateAndAssignScene(named: name) },
-                onCancel: { isShowingScenePicker = false }
+                onCancel: { detailStore.isShowingScenePicker = false }
             )
         }
-        .onChange(of: selection) { _, _ in refreshSelectionDerivedState() }
-        .onChange(of: editingAsset) { _, _ in refreshSelectionDerivedState() }
-        .task { backfillMissingSessions() }
+        .onChange(of: detailStore.selection) { _, _ in detailStore.refreshSelectionDerivedState(allAssets: allAssets, scenes: scenes) }
+        .onChange(of: detailStore.editingAsset) { _, newValue in
+            detailStore.refreshSelectionDerivedState(allAssets: allAssets, scenes: scenes)
+            sidebarVisibility = newValue == nil ? .all : .detailOnly
+        }
+        .onChange(of: selectedScene) { _, _ in refreshFilteredAssets() }
+        .onChange(of: selectedSession) { _, _ in refreshFilteredAssets() }
+        .onChange(of: detailStore.ratingFilter) { _, _ in refreshFilteredAssets() }
+        .onChange(of: detailStore.flagFilter) { _, _ in refreshFilteredAssets() }
+        .onChange(of: detailStore.sortOption) { _, _ in refreshFilteredAssets() }
+        .onChange(of: detailStore.gridMode) { _, newMode in
+            switch newMode {
+            case .edit:
+                guard detailStore.editingAsset == nil, detailStore.selection.count == 1, let id = detailStore.selection.first,
+                      let asset = allAssets.first(where: { $0.id == id }) else { return }
+                openEditor(for: asset)
+            case .sessions:
+                guard detailStore.editingAsset != nil else { return }
+                closeEditor()
+            }
+        }
+        .task {
+            backfillMissingSessions()
+            cleanupLegacyStackKindStages()
+            backfillMissingStackStages()
+            refreshFilteredAssets()
+        }
     }
 
-    /// One-time migration for photos imported before the Session model existed (Phase 0 of the
-    /// Stages feature): every `PhotoAsset.session` on this app's real library was `nil`, which
-    /// silently broke every session-scoped action — "Add Selected to Scene", ⌘S, and the scene
-    /// itself never showing up under any session in the sidebar (`SidebarView` only lists scenes
-    /// nested under a session row). Rather than threading "nil session is a valid shared value"
-    /// through `commonSessionForSelection`/scene creation/the sidebar, this backs every orphaned
-    /// asset into one shared session so the rest of the app's "a scene lives inside one session"
-    /// invariant just holds. Idempotent — `orphaned` is empty on every run after the first.
+    private func refreshFilteredAssets() {
+        detailStore.refreshFilteredAssets(allAssets: allAssets, selectedScene: selectedScene, selectedSession: selectedSession)
+    }
+
+    private func openEditor(for asset: PhotoAsset) {
+        detailStore.editingAsset = asset
+    }
+
+    private func closeEditor() {
+        try? modelContext.save()
+        detailStore.editingAsset = nil
+    }
+
     private func backfillMissingSessions() {
         let orphaned = allAssets.filter { $0.session == nil }
         guard !orphaned.isEmpty else { return }
@@ -281,85 +212,124 @@ struct ContentView: View {
         try? modelContext.save()
     }
 
+    /// One-time cleanup for a dev-only mistake: an earlier iteration of stack-sharing (since
+    /// reverted) gave `Stage` a fourth `StageKind` case, `.stack` (raw value 3), and created one
+    /// per pre-existing `PhotoStack` on this machine's local dev database. That case no longer
+    /// exists — `Stage.kind`'s getter falls back to `.custom` for any unrecognized raw value — so
+    /// those leftover records were resurfacing as a bogus custom stage literally named "Stack".
+    /// Deletes them by their still-persisted raw value, which is now dead and can't collide with
+    /// anything `Stage.init` still writes. Not a concern for anyone else's database, since this
+    /// case was never in a shipped build.
+    private func cleanupLegacyStackKindStages() {
+        guard let stages = try? modelContext.fetch(FetchDescriptor<Stage>()) else { return }
+        let legacy = stages.filter { $0.kindRaw == 3 }
+        guard !legacy.isEmpty else { return }
+        for stage in legacy { modelContext.delete(stage) }
+        try? modelContext.save()
+    }
+
+    /// `PhotoStack.stages` is a new relationship — existing stacks created before it existed have
+    /// no `.single` stage on disk (SwiftData's lightweight migration adds the column but doesn't
+    /// re-run `PhotoStack.init`, the only other place one gets created), so `PhotoAsset.singleStage`
+    /// would silently fall back to each photo's own pre-stacking stage instead of actually sharing
+    /// one. One-time fetch, not a `@Query`, since this only needs to run once at launch, not stay
+    /// live — see `backfillMissingSessions` above for the same reasoning.
+    private func backfillMissingStackStages() {
+        guard let stacks = try? modelContext.fetch(FetchDescriptor<PhotoStack>()) else { return }
+        var didChange = false
+        for stack in stacks where stack.singleStage == nil {
+            let stage = Stage(kind: .single, name: "Single", stack: stack)
+            modelContext.insert(stage)
+            stack.stages?.append(stage)
+            didChange = true
+        }
+        guard didChange else { return }
+        try? modelContext.save()
+    }
+
+    /// Built once, attached in one place (`detail`'s `.toolbar` above), and shared by both the grid
+    /// and the editor now that the editor is swapped in rather than pushed — see the comment on the
+    /// `Group` in `body` for why that's what makes the Mode picker persistent. The icon cluster only
+    /// makes sense for the grid (sort/filter/organize/import all act on `allAssets`), so it's gated
+    /// behind `editingAsset == nil`; the editor gets a single "Done" button in its place. The Mode
+    /// picker itself is unconditional — it's the one control meant to survive the swap.
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                importFolder()
-            } label: {
-                Label("Import Folder", systemImage: "folder.badge.plus")
-            }
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                if let id = selection.first, let asset = allAssets.first(where: { $0.id == id }) {
-                    editingAsset = asset
+        if detailStore.editingAsset == nil {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    importFolder()
+                } label: {
+                    Label("Import Folder", systemImage: "folder.badge.plus")
                 }
-            } label: {
-                Label("Edit…", systemImage: "slider.horizontal.3")
             }
-            .disabled(selection.count != 1)
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Button("Group Selected into Stack (G)") { groupSelectedIntoStack() }
-                    .disabled(selection.count < 2)
-                Button("Unstack Selected (⇧G)") { unstackSelected() }
-                    .disabled(selection.isEmpty)
-                Divider()
-                Menu("Add Selected to Scene") {
-                    ForEach(scenesInCommonSession) { scene in
-                        Button(scene.name) { addSelected(to: scene) }
+            ToolbarItem(placement: .primaryAction) {
+                EditButton(store: detailStore, onEdit: {
+                    if let id = detailStore.selection.first, let asset = allAssets.first(where: { $0.id == id }) {
+                        openEditor(for: asset)
                     }
-                    if !scenesInCommonSession.isEmpty { Divider() }
-                    Button("New Scene…") {
-                        addSelectionToNewScene = true
-                        newSceneName = ""
-                        newSceneSession = commonSessionForSelection
-                        isShowingNewSceneAlert = true
+                })
+            }
+            ToolbarItem(placement: .primaryAction) {
+                OrganizeMenu(
+                    store: detailStore,
+                    selectedScene: selectedScene,
+                    onGroupStack: groupSelectedIntoStack,
+                    onUnstack: unstackSelected,
+                    onAddSelected: addSelected,
+                    onNewScene: {
+                        detailStore.addSelectionToNewScene = true
+                        detailStore.newSceneName = ""
+                        detailStore.newSceneSession = detailStore.commonSessionForSelection
+                        detailStore.isShowingNewSceneAlert = true
+                    },
+                    onRemoveFromScene: removeSelectedFromCurrentScene
+                )
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Picker("Sort", selection: $detailStore.sortOption) {
+                        ForEach(SortOption.allCases) { option in
+                            Text(option.rawValue).tag(option)
+                        }
                     }
+                } label: {
+                    Label("Sort", systemImage: "arrow.up.arrow.down")
                 }
-                .disabled(commonSessionForSelection == nil)
-                if selectedScene != nil {
-                    Button("Remove Selected from This Scene") { removeSelectedFromCurrentScene() }
-                        .disabled(selection.isEmpty)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Picker("Minimum Rating", selection: $detailStore.ratingFilter) {
+                        Text("All Ratings").tag(0)
+                        ForEach(1...5, id: \.self) { r in
+                            Text("\(r)+ Stars").tag(r)
+                        }
+                    }
+                    Divider()
+                    Picker("Flag", selection: $detailStore.flagFilter) {
+                        Text("All Flags").tag(FlagState?.none)
+                        Text("Picked").tag(FlagState?.some(.pick))
+                        Text("Rejected").tag(FlagState?.some(.reject))
+                        Text("Unflagged").tag(FlagState?.some(.none))
+                    }
+                } label: {
+                    Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
                 }
-            } label: {
-                Label("Organize", systemImage: "square.stack.3d.up")
+            }
+        } else {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Done") { closeEditor() }
             }
         }
+        // NSToolbar lays items out left-to-right with no automatic trailing alignment on macOS —
+        // `.confirmationAction` was tried first and rendered in the same leading cluster as
+        // everything above, not the far right. A `Spacer()` item is what actually claims the
+        // remaining flexible space and pushes what follows to the toolbar's far-right edge.
         ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Picker("Sort", selection: $sortOption) {
-                    ForEach(SortOption.allCases) { option in
-                        Text(option.rawValue).tag(option)
-                    }
-                }
-            } label: {
-                Label("Sort", systemImage: "arrow.up.arrow.down")
-            }
+            Spacer()
         }
         ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Picker("Minimum Rating", selection: $ratingFilter) {
-                    Text("All Ratings").tag(0)
-                    ForEach(1...5, id: \.self) { r in
-                        Text("\(r)+ Stars").tag(r)
-                    }
-                }
-                Divider()
-                Picker("Flag", selection: $flagFilter) {
-                    Text("All Flags").tag(FlagState?.none)
-                    Text("Picked").tag(FlagState?.some(.pick))
-                    Text("Rejected").tag(FlagState?.some(.reject))
-                    Text("Unflagged").tag(FlagState?.some(.none))
-                }
-            } label: {
-                Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
-            }
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Picker("Mode", selection: $gridMode) {
+            Picker("Mode", selection: $detailStore.gridMode) {
                 ForEach(GridMode.allCases) { mode in
                     Text(mode.rawValue).tag(mode)
                 }
@@ -400,13 +370,14 @@ struct ContentView: View {
         do {
             let count = try importer.importFiles(files, into: modelContext, session: session)
             importStatus = "Imported \(count) new file\(count == 1 ? "" : "s") (\(files.count) RAW file\(files.count == 1 ? "" : "s") found)."
+            refreshFilteredAssets()
         } catch {
             importStatus = "Import failed: \(error.localizedDescription)"
         }
     }
 
     private func groupSelectedIntoStack() {
-        let selected = allAssets.filter { selection.contains($0.id) }
+        let selected = allAssets.filter { detailStore.selection.contains($0.id) }
         guard selected.count >= 2 else { return }
 
         var touchedStacks = Set<PhotoStack>()
@@ -425,14 +396,12 @@ struct ContentView: View {
             modelContext.delete(old)
         }
         try? modelContext.save()
-        refreshTrigger += 1
+        detailStore.refreshTrigger += 1
+        refreshFilteredAssets()
     }
 
     private func unstackSelected() {
-        // Selecting a collapsed stack only selects its cover photo, so unstacking must
-        // dissolve every member of any touched stack — not just the selected asset —
-        // or the other members are silently left behind in an orphaned singleton stack.
-        let selected = allAssets.filter { selection.contains($0.id) }
+        let selected = allAssets.filter { detailStore.selection.contains($0.id) }
         var touchedStacks = Set<PhotoStack>()
         for asset in selected {
             if let stack = asset.stack {
@@ -446,65 +415,65 @@ struct ContentView: View {
             modelContext.delete(stack)
         }
         try? modelContext.save()
-        refreshTrigger += 1
+        detailStore.refreshTrigger += 1
+        refreshFilteredAssets()
     }
 
     private func addSelected(to scene: PhotoScene) {
-        // Singular assignment: a photo belongs to at most one scene, so adding to a new scene
-        // reassigns rather than appends.
-        let selected = allAssets.filter { selection.contains($0.id) }
+        let selected = allAssets.filter { detailStore.selection.contains($0.id) }
         for asset in selected {
             asset.scene = scene
         }
         try? modelContext.save()
-        refreshTrigger += 1
+        detailStore.refreshTrigger += 1
+        refreshFilteredAssets()
     }
 
     private func removeSelectedFromCurrentScene() {
         guard let selectedScene else { return }
-        let selected = allAssets.filter { selection.contains($0.id) }
+        let selected = allAssets.filter { detailStore.selection.contains($0.id) }
         for asset in selected where asset.scene?.id == selectedScene.id {
             asset.scene = nil
         }
         try? modelContext.save()
-        refreshTrigger += 1
+        detailStore.refreshTrigger += 1
+        refreshFilteredAssets()
     }
 
     private func createScene(named name: String, addSelection: Bool) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let session = newSceneSession else { return }
+        guard !trimmed.isEmpty, let session = detailStore.newSceneSession else { return }
         let scene = PhotoScene(name: trimmed, session: session)
         modelContext.insert(scene)
         if addSelection {
-            let selected = allAssets.filter { selection.contains($0.id) }
+            let selected = allAssets.filter { detailStore.selection.contains($0.id) }
             for asset in selected {
                 asset.scene = scene
             }
         }
         try? modelContext.save()
-        newSceneName = ""
-        newSceneSession = nil
+        detailStore.newSceneName = ""
+        detailStore.newSceneSession = nil
         selectedScene = scene
         selectedSession = session
-        refreshTrigger += 1
+        detailStore.refreshTrigger += 1
+        refreshFilteredAssets()
     }
 
-    /// ⌘S's "New Scene Name" field — same shape as `createScene(named:addSelection:)` but scoped
-    /// directly to `commonSessionForSelection` rather than the alert's `newSceneSession` state, so
-    /// it works as a one-shot action straight from the grid without going through that alert flow.
     private func quickCreateAndAssignScene(named name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let session = commonSessionForSelection else { return }
+        guard !trimmed.isEmpty, let session = detailStore.commonSessionForSelection else { return }
         let scene = PhotoScene(name: trimmed, session: session)
         modelContext.insert(scene)
-        let selected = allAssets.filter { selection.contains($0.id) }
+        let selected = allAssets.filter { detailStore.selection.contains($0.id) }
         for asset in selected {
             asset.scene = scene
         }
         try? modelContext.save()
-        quickSceneName = ""
-        isShowingScenePicker = false
-        refreshTrigger += 1
+        detailStore.quickSceneName = ""
+        detailStore.isShowingScenePicker = false
+        detailStore.refreshTrigger += 1
+        refreshFilteredAssets()
     }
 
     private func deleteScene(_ scene: PhotoScene) {
@@ -513,7 +482,8 @@ struct ContentView: View {
         }
         modelContext.delete(scene)
         try? modelContext.save()
-        refreshTrigger += 1
+        detailStore.refreshTrigger += 1
+        refreshFilteredAssets()
     }
 }
 

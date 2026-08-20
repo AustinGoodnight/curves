@@ -2,22 +2,22 @@ import SwiftUI
 import AppKit
 import PhotoCatalog
 
-private enum DisplayItem: Identifiable {
-    case single(PhotoAsset)
-    case stackCover(PhotoStack, cover: PhotoAsset, count: Int)
-    case stackMember(PhotoAsset, position: Int, total: Int)
-
-    var id: String {
-        switch self {
-        case .single(let asset): return "single-\(asset.id)"
-        case .stackCover(let stack, _, _): return "cover-\(stack.id)"
-        case .stackMember(let asset, _, _): return "member-\(asset.id)"
-        }
-    }
-}
-
 struct CullingGridView: View {
     let assets: [PhotoAsset]
+    /// Pre-built by `DetailStore.rebuildDisplayItems()` — deliberately **not** computed here. See
+    /// `DetailStore`'s doc comment on that method: building this list touches `.stack`/`.id` on
+    /// every asset, and doing that inside a tracked `View.body` (as this used to do, as a computed
+    /// property read at the top of `body`) registers this view as an Observation dependent of
+    /// *every one of those objects' properties* — on a 1708-asset library that's ~3000+ dependency
+    /// edges rebuilt on every render, and meant *any* unrelated SwiftData background activity
+    /// (autosave, relationship fault resolution) could re-trigger a full grid re-render with no
+    /// user action involved. That's what was still causing a mysterious *second* full render
+    /// ~150-190ms after every single click/arrow-key press, even after `selection`/`editingAsset`
+    /// were already isolated into their own `DetailStore` (see `DetailPaneView.swift`) — this view
+    /// itself was still re-deriving `displayItems` reactively. Building it in an ordinary
+    /// (untracked) function instead, and handing this view only the *result*, means this view
+    /// depends on exactly one thing: the `displayItems` array value itself.
+    let displayItems: [DisplayItem]
     @Binding var selection: Set<UUID>
     /// "Sessions" mode (`false`): a click only selects — multi-select for rating/flagging/
     /// stacking/scene-assigning stays available, opening a photo needs the hover-revealed edit
@@ -28,49 +28,42 @@ struct CullingGridView: View {
     var onGroupStack: () -> Void = {}
     var onUnstack: () -> Void = {}
     var onOpenEditor: (PhotoAsset) -> Void = { _ in }
+    /// Called after a rating/flag edit made via keyboard shortcut, since those mutate `PhotoAsset`
+    /// properties directly from here rather than through one of `DetailPaneView`'s own mutation
+    /// functions. `DetailStore` uses this to invalidate its cached `filteredAssets`/`displayItems`.
+    var onDataChanged: () -> Void = {}
+    /// Expand/collapse a stack cover — mutates `DetailStore.expandedStacks` and rebuilds
+    /// `displayItems`. Not local `@State` here anymore, for the same reason `displayItems` itself
+    /// isn't: it needs to live where the (untracked) rebuild function lives.
+    var onToggleStack: (UUID, Bool) -> Void = { _, _ in }
 
-    @State private var expandedStacks: Set<UUID> = []
     @State private var lastClickedID: UUID?
-    @State private var columnCount: Int = 5
+    /// Set only by `moveFocus` (keyboard arrow-key navigation), never by `handleClick` (mouse
+    /// clicks) — a fixed-cost animated `scrollTo` on *every* click, regardless of library size,
+    /// was what made selecting a photo feel slow even on a small library after the two data-
+    /// scaling fixes above landed. A mouse click can only ever land on a cell that's already
+    /// visible on screen, so there's never a reason to re-center the scroll view for one; that
+    /// behavior only matters for keyboard navigation, which can move focus off-screen.
+    @State private var scrollTarget: UUID?
+    /// Fixed rather than computed from the container width via `GeometryReader` — that measuring
+    /// pass turned out to be the actual remaining cause of the large-library click/arrow-key lag
+    /// (confirmed by temporarily removing it entirely): `GeometryReader` forces a full second
+    /// layout pass of everything inside it — including the whole 1708-item `LazyVGrid` — roughly
+    /// 150-200ms after the first, on every single state change, regardless of whether the
+    /// container size actually changed. A fixed column count sidesteps that entirely at the cost
+    /// of not reflowing when the window resizes.
+    private let columnCount = 7
     @FocusState private var isFocused: Bool
 
-    private let cellWidth: CGFloat = 180
     private let spacing: CGFloat = 12
 
     private var gridColumns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: spacing), count: max(columnCount, 1))
     }
 
-    /// ⚠️ Rebuilds the *entire* grid's worth of items from scratch on every access (O(n), with an
-    /// O(n) inner scan per stack) — see `CLAUDE.md` incident #4. Never call this more than once
-    /// per `body` evaluation, and never from a function that runs per-cell (`cell(for:at:in:)` and
-    /// friends take an already-computed `items` array as a parameter for exactly this reason).
-    private var displayItems: [DisplayItem] {
-        var seenStacks = Set<UUID>()
-        var items: [DisplayItem] = []
-        for asset in assets {
-            if let stack = asset.stack {
-                guard !seenStacks.contains(stack.id) else { continue }
-                seenStacks.insert(stack.id)
-                let visibleMembers = (stack.photos ?? [])
-                    .filter { member in assets.contains(where: { $0.id == member.id }) }
-                    .sorted { ($0.captureDate ?? $0.importDate) < ($1.captureDate ?? $1.importDate) }
-                guard let cover = visibleMembers.first else { continue }
-                if expandedStacks.contains(stack.id) {
-                    let total = visibleMembers.count
-                    for (index, member) in visibleMembers.enumerated() {
-                        items.append(.stackMember(member, position: index + 1, total: total))
-                    }
-                } else {
-                    items.append(.stackCover(stack, cover: cover, count: visibleMembers.count))
-                }
-            } else {
-                items.append(.single(asset))
-            }
-        }
-        return items
-    }
-
+    /// Only ever called from action closures (`.onAppear`, `handleClick`, `handleKeyPress`), never
+    /// from `body` itself — see `displayItems`'s doc comment for why that distinction matters. This
+    /// one's fine to keep as a computed property since nothing here reads it reactively.
     private var clickableIDsInOrder: [UUID] {
         displayItems.map { item in
             switch item {
@@ -82,42 +75,26 @@ struct CullingGridView: View {
     }
 
     var body: some View {
-        // Computed once per body pass and threaded through explicitly (`cell(for:at:in:)`,
-        // `sceneBorderInfo`, `currentScene`) rather than left as repeated reads of the
-        // `displayItems` computed property — `displayItems` rebuilds the *entire* list (1000s of
-        // items, with an O(n) inner scan per stack) from scratch on every access. Building the
-        // scene border for one cell used to call `currentScene(at:)` up to 5 times (self + 4
-        // neighbors), each of which read `displayItems` twice (`.indices.contains` and the
-        // subscript) — roughly 10 full rebuilds *per visible cell*, for every visible cell, on
-        // every render. That's the exact "computed property read too many times" trap from
-        // `CLAUDE.md`, just newly reintroduced here instead of in `ContentView`.
-        let items = displayItems
-        return GeometryReader { geo in
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVGrid(columns: gridColumns, spacing: spacing) {
-                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            cell(for: item, at: index, in: items)
-                        }
-                    }
-                    .padding(spacing)
-                }
-                .onChange(of: lastClickedID) { _, newValue in
-                    if let newValue {
-                        withAnimation { proxy.scrollTo(newValue, anchor: .center) }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVGrid(columns: gridColumns, spacing: spacing) {
+                    ForEach(Array(displayItems.enumerated()), id: \.element.id) { index, item in
+                        cell(for: item, at: index, in: displayItems)
                     }
                 }
-                .background(Color.workspaceBackground)
+                .padding(spacing)
             }
-            .onAppear {
-                updateColumnCount(for: geo.size.width)
-                if selection.isEmpty, let first = clickableIDsInOrder.first {
-                    selection = [first]
-                    lastClickedID = first
+            .onChange(of: scrollTarget) { _, newValue in
+                if let newValue {
+                    withAnimation { proxy.scrollTo(newValue, anchor: .center) }
                 }
             }
-            .onChange(of: geo.size.width) { _, newWidth in
-                updateColumnCount(for: newWidth)
+            .background(Color.workspaceBackground)
+        }
+        .onAppear {
+            if selection.isEmpty, let first = clickableIDsInOrder.first {
+                selection = [first]
+                lastClickedID = first
             }
         }
         .focusable()
@@ -127,9 +104,11 @@ struct CullingGridView: View {
     }
 
     /// Which scene (if any) the item at `index` belongs to — used both directly and to compare a
-    /// cell against its grid neighbors when building `sceneBorderInfo(at:in:)`. Takes the already-
-    /// computed `items` array rather than reading `displayItems` itself — see `body`'s comment for
-    /// why re-deriving it here would be catastrophically expensive.
+    /// cell against its grid neighbors when building `sceneBorderInfo(at:in:)`. Takes the
+    /// `displayItems` array as a parameter purely for symmetry with the rest of this file's
+    /// per-cell helpers; reading `self.displayItems` directly here would be equally safe now that
+    /// it's a stored `let`, not a computed property, but threading it through keeps the "per-cell
+    /// helpers take their data as parameters" convention consistent.
     private func currentScene(at index: Int, in items: [DisplayItem]) -> PhotoScene? {
         guard items.indices.contains(index) else { return nil }
         switch items[index] {
@@ -184,7 +163,7 @@ struct CullingGridView: View {
                 asset: cover,
                 isSelected: selection.contains(cover.id),
                 stackBadge: .collapsed(count: count),
-                onToggleStack: { expandedStacks.insert(stack.id) },
+                onToggleStack: { onToggleStack(stack.id, true) },
                 sceneBorder: sceneBorder,
                 onOpenEditor: { onOpenEditor(cover) }
             )
@@ -211,11 +190,7 @@ struct CullingGridView: View {
 
     private func collapseStack(containing asset: PhotoAsset) {
         guard let stack = asset.stack else { return }
-        expandedStacks.remove(stack.id)
-    }
-
-    private func updateColumnCount(for width: CGFloat) {
-        columnCount = max(1, Int(width / (cellWidth + spacing)))
+        onToggleStack(stack.id, false)
     }
 
     private func handleClick(_ id: UUID) {
@@ -250,6 +225,9 @@ struct CullingGridView: View {
             selection = [target]
             lastClickedID = target
         }
+        // Arrow-key navigation can move focus off-screen, unlike a mouse click — this is the one
+        // path that's allowed to trigger the animated re-center scroll.
+        scrollTarget = target
     }
 
     private func targetAssets(for ids: Set<UUID>) -> [PhotoAsset] {
@@ -291,6 +269,7 @@ struct CullingGridView: View {
 
         if let rating = Int(press.characters), (0...5).contains(rating), press.modifiers.isEmpty {
             for asset in targets { asset.rating = rating }
+            onDataChanged()
             return .handled
         }
 
@@ -301,6 +280,7 @@ struct CullingGridView: View {
             } else {
                 for asset in targets { asset.flag = .pick }
             }
+            onDataChanged()
             return .handled
         case "r":
             if targets.count == 1, let only = targets.first {
@@ -308,9 +288,11 @@ struct CullingGridView: View {
             } else {
                 for asset in targets { asset.flag = .reject }
             }
+            onDataChanged()
             return .handled
         case "u":
             for asset in targets { asset.flag = .none }
+            onDataChanged()
             return .handled
         case "g":
             if extend {
