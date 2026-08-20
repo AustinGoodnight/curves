@@ -60,6 +60,20 @@ struct StagesSidebarView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
+            Section("Info") {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !asset.cameraModel.isEmpty {
+                        infoRow("Camera", asset.cameraModel)
+                    }
+                    if !asset.lensModel.isEmpty {
+                        infoRow("Lens", asset.lensModel)
+                    }
+                    if !exposureSummary.isEmpty {
+                        infoRow("Exposure", exposureSummary)
+                    }
+                }
+                .listRowSeparator(.hidden)
+            }
             if !stackedPhotos.isEmpty {
                 Section("Stack") {
                     ForEach(stackedPhotos) { photo in
@@ -97,6 +111,27 @@ struct StagesSidebarView: View {
                 if !trimmed.isEmpty { renamingStage?.name = trimmed }
             }
         }
+    }
+
+    /// `"f/2.8  1/250s  ISO 400  50mm"` — whichever of the four EXIF readouts the file actually
+    /// had, space-joined; empty when none did (a file with no EXIF at all, or one imported before
+    /// this field existed).
+    private var exposureSummary: String {
+        [asset.apertureDisplay, asset.shutterSpeedDisplay, asset.isoDisplay, asset.focalLengthDisplay]
+            .filter { !$0.isEmpty }
+            .joined(separator: "  ")
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+        }
+        .font(.caption)
     }
 
     private func row(for stage: Stage, title: String) -> some View {

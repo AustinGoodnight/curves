@@ -32,6 +32,7 @@ struct ColorDensityWheel: View {
         .frame(width: diameter, height: diameter)
         .background(Circle().fill(Color.black.opacity(0.35)))
         .clipShape(Circle())
+        .overlay(Circle().stroke(Color.primary.opacity(0.2), lineWidth: 1))
     }
 
     /// Built from plotted points (`cos`/`sin` at each corner), the same technique

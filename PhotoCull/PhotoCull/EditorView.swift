@@ -49,7 +49,7 @@ struct EditorView: View {
                 .frame(minWidth: 160, idealWidth: 200, maxWidth: 280)
 
                 ZStack {
-                    Color.black
+                    Color.editorPreviewBackground
                     if let previewImage = coordinator.previewImage {
                         Image(decorative: previewImage, scale: 1)
                             .resizable()

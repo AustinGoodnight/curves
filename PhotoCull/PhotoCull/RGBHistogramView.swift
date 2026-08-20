@@ -24,6 +24,7 @@ struct RGBHistogramView: View {
         .frame(height: height)
         .background(Color.primary.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.2), lineWidth: 1))
     }
 
     /// A filled area chart (not individual bars) — with three channels overlapping via

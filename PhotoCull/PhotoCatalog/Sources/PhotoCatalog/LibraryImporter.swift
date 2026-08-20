@@ -40,6 +40,7 @@ public final class LibraryImporter {
             let fileSize = (attrs?[.size] as? Int64) ?? 0
             let captureDate = ThumbnailProvider.captureDate(for: url)
             let dimensions = ThumbnailProvider.pixelDimensions(for: url)
+            let metadata = ThumbnailProvider.captureMetadata(for: url)
             let bookmark = try? url.bookmarkData(options: [.minimalBookmark])
 
             let asset = PhotoAsset(
@@ -51,7 +52,13 @@ public final class LibraryImporter {
                 captureDate: captureDate,
                 fileSize: fileSize,
                 pixelWidth: dimensions.width,
-                pixelHeight: dimensions.height
+                pixelHeight: dimensions.height,
+                cameraModel: metadata.cameraModel,
+                lensModel: metadata.lensModel,
+                iso: metadata.iso,
+                shutterSpeed: metadata.shutterSpeed,
+                aperture: metadata.aperture,
+                focalLength: metadata.focalLength
             )
             context.insert(asset)
             importedCount += 1

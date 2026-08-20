@@ -1,18 +1,31 @@
 import SwiftUI
 import PhotoCatalog
 
-/// A small thumbnail used by `SessionFilmstripView` and `StagesSidebarView`'s "Stack" section —
-/// same cache/load path as `PhotoThumbnailCell`, without any of the grid's rating/flag/stack-badge
-/// chrome that neither of these two spots needs.
+/// Shared by `CompactPhotoThumbnail` and `FilmstripThumbnail` — same cache/decode path
+/// `PhotoThumbnailCell.loadThumbnail` uses, factored out since both need it with different chrome
+/// wrapped around it.
+private func loadCachedThumbnail(for asset: PhotoAsset) async -> CGImage? {
+    let key = asset.filePath
+    if let cached = ThumbnailCache.shared.image(for: key) {
+        return cached
+    }
+    let url = asset.resolvedURL()
+    let image = await Task.detached(priority: .userInitiated) {
+        ThumbnailProvider.thumbnail(for: url)
+    }.value
+    if let image {
+        ThumbnailCache.shared.setImage(image, for: key)
+    }
+    return image
+}
+
+/// A small, fixed-size square thumbnail — used by `StagesSidebarView`'s "Stack" section, next to a
+/// filename in a row. See `FilmstripThumbnail` for the full-width, no-card style
+/// `SessionFilmstripView` uses instead.
 struct CompactPhotoThumbnail: View {
     let asset: PhotoAsset
     let isCurrent: Bool
     var size: CGFloat = 96
-    /// Non-nil and >1 only for `SessionFilmstripView`'s collapsed-stack entries — draws the same
-    /// "square.stack + count" badge `PhotoThumbnailCell.stackBadgeView` draws for a stack cover in
-    /// the main grid. `nil` everywhere else (including `StagesSidebarView`'s "Stack" section, where
-    /// every entry is already a specific single photo — a count badge there would be redundant).
-    var stackCount: Int? = nil
 
     @State private var thumbnail: CGImage?
 
@@ -33,14 +46,65 @@ struct CompactPhotoThumbnail: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(isCurrent ? Color.accentColor : .clear, lineWidth: 3)
         )
+        .task(id: asset.filePath) {
+            thumbnail = await loadCachedThumbnail(for: asset)
+        }
+    }
+}
+
+/// One full-width row in `SessionFilmstripView` — no card background, no fixed size, no padding
+/// "wrapper" around it: the photo renders edge-to-edge at its own aspect ratio, the way a real
+/// contact-sheet filmstrip looks. `Image.aspectRatio(_:contentMode:)` given an explicit ratio (not
+/// just a `ContentMode`) is what makes `.frame(maxWidth: .infinity)` alone enough to get the right
+/// height — no `GeometryReader` needed to read back an available width.
+private struct FilmstripThumbnail: View {
+    let asset: PhotoAsset
+    let isCurrent: Bool
+    let stackCount: Int
+
+    @State private var thumbnail: CGImage?
+
+    /// From the *loaded thumbnail's* own pixel dimensions, not `asset.pixelWidth`/`pixelHeight` —
+    /// those are the raw sensor buffer's dimensions and ignore the shot's EXIF orientation, so a
+    /// portrait photo from a rotated sensor reports landscape width/height and rendered cropped to
+    /// horizontal here. `ThumbnailProvider.thumbnail(for:)` decodes with
+    /// `kCGImageSourceCreateThumbnailWithTransform: true`, which *does* apply that rotation, so the
+    /// decoded `CGImage`'s own `width`/`height` are already correctly oriented. Square (1:1) until
+    /// the thumbnail loads — better an honest, brief placeholder shape than a confidently wrong one.
+    private var aspectRatio: CGFloat {
+        guard let thumbnail, thumbnail.width > 0, thumbnail.height > 0 else { return 1 }
+        return CGFloat(thumbnail.width) / CGFloat(thumbnail.height)
+    }
+
+    var body: some View {
+        ZStack {
+            if let thumbnail {
+                Image(decorative: thumbnail, scale: 1)
+                    .resizable()
+                    .aspectRatio(aspectRatio, contentMode: .fit)
+            } else {
+                Color.gray.opacity(0.15)
+                    .aspectRatio(aspectRatio, contentMode: .fit)
+                ProgressView().controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .overlay {
+            if isCurrent {
+                RoundedRectangle(cornerRadius: 5).stroke(Color.accentColor, lineWidth: 3)
+            }
+        }
         .overlay(alignment: .bottomLeading) { stackBadge }
         .task(id: asset.filePath) {
-            await loadThumbnail()
+            thumbnail = await loadCachedThumbnail(for: asset)
         }
     }
 
+    /// Draws only for a collapsed-stack entry (`stackCount > 1`) — same "square.stack + count"
+    /// treatment `PhotoThumbnailCell.stackBadgeView` uses for a stack cover in the main grid.
     @ViewBuilder private var stackBadge: some View {
-        if let stackCount, stackCount > 1 {
+        if stackCount > 1 {
             HStack(spacing: 2) {
                 Image(systemName: "square.stack.fill")
                 Text("\(stackCount)")
@@ -49,23 +113,7 @@ struct CompactPhotoThumbnail: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 2)
             .background(.thinMaterial, in: Capsule())
-            .padding(3)
-        }
-    }
-
-    private func loadThumbnail() async {
-        let key = asset.filePath
-        if let cached = ThumbnailCache.shared.image(for: key) {
-            thumbnail = cached
-            return
-        }
-        let url = asset.resolvedURL()
-        let image = await Task.detached(priority: .userInitiated) {
-            ThumbnailProvider.thumbnail(for: url)
-        }.value
-        if let image {
-            ThumbnailCache.shared.setImage(image, for: key)
-            thumbnail = image
+            .padding(4)
         }
     }
 }
@@ -78,17 +126,16 @@ struct SessionFilmstripView: View {
     var onSelectAsset: (PhotoAsset) -> Void
 
     /// One entry per *shot*, not per photo — a stack collapses to a single thumbnail here (with a
-    /// count badge, see `stackCount`), same as the main grid's stack cover, since this panel is
-    /// about picking which shot to look at. `StagesSidebarView`'s "Stack" section is where you pick
-    /// a specific take within one. The representative for a stack the currently-open photo belongs
-    /// to is `asset` itself (so the filmstrip shows the actual open photo, not always the stack's
-    /// earliest member); for any other stack it's just the earliest member. Reads
+    /// count badge, see `FilmstripThumbnail.stackBadge`), same as the main grid's stack cover, since
+    /// this panel is about picking which shot to look at. `StagesSidebarView`'s "Stack" section is
+    /// where you pick a specific take within one. The representative for a stack the currently-open
+    /// photo belongs to is `asset` itself (so the filmstrip shows the actual open photo, not always
+    /// the stack's earliest member); for any other stack it's just the earliest member. Reads
     /// `asset.session?.photos` — a relationship on the one already-in-memory asset being edited,
     /// bounded to that session's size, not a library-wide `@Query` scan. Not the trap `CLAUDE.md`
     /// warns about (that's specifically about `ContentView`'s `@Query var allAssets`).
     private struct Item: Identifiable {
         let photo: PhotoAsset
-        /// 1 for an unstacked photo — `CompactPhotoThumbnail` only draws a badge above 1.
         let stackCount: Int
         var id: UUID { photo.id }
     }
@@ -119,18 +166,16 @@ struct SessionFilmstripView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10)
-                .padding(.top, 10)
+                .padding(.vertical, 10)
             ScrollView {
-                LazyVStack(spacing: 10) {
+                LazyVStack(spacing: 12) {
                     ForEach(filmstripItems) { item in
-                        CompactPhotoThumbnail(
-                            asset: item.photo, isCurrent: item.photo.id == asset.id, size: 120, stackCount: item.stackCount
-                        )
-                        .id(item.photo.id)
-                        .onTapGesture { onSelectAsset(item.photo) }
+                        FilmstripThumbnail(asset: item.photo, isCurrent: item.photo.id == asset.id, stackCount: item.stackCount)
+                            .id(item.photo.id)
+                            .onTapGesture { onSelectAsset(item.photo) }
                     }
                 }
-                .padding(10)
+                .padding(12)
             }
         }
         .frame(minWidth: 130, idealWidth: 150, maxWidth: 200)

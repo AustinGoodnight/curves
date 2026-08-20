@@ -156,7 +156,7 @@ struct EditorSidebarView: View {
             }
             .padding()
         }
-        .background(Color.workspaceBackground)
+        .background(Color.sidebarBackground)
         .toggleStyle(.switch)
         .disabled(!coordinator.isReady)
     }

@@ -17,6 +17,17 @@ public final class PhotoAsset {
     public var flagRaw: Int = FlagState.none.rawValue
     public var colorLabelRaw: Int = ColorLabel.none.rawValue
 
+    /// EXIF/TIFF readouts captured at import time (see `ThumbnailProvider.captureMetadata`) —
+    /// empty string/zero when the file's tags didn't have that field, not `nil`, so older assets
+    /// that predate this migrate in at the same "unknown" default a fresh import would get for a
+    /// file missing that tag.
+    public var cameraModel: String = ""
+    public var lensModel: String = ""
+    public var iso: Int = 0
+    public var shutterSpeed: Double = 0
+    public var aperture: Double = 0
+    public var focalLength: Double = 0
+
     public var stack: PhotoStack?
     public var scene: PhotoScene?
     public var session: Session?
@@ -84,7 +95,13 @@ public final class PhotoAsset {
         captureDate: Date? = nil,
         fileSize: Int64 = 0,
         pixelWidth: Int = 0,
-        pixelHeight: Int = 0
+        pixelHeight: Int = 0,
+        cameraModel: String = "",
+        lensModel: String = "",
+        iso: Int = 0,
+        shutterSpeed: Double = 0,
+        aperture: Double = 0,
+        focalLength: Double = 0
     ) {
         self.id = UUID()
         self.filePath = filePath
@@ -97,10 +114,43 @@ public final class PhotoAsset {
         self.fileSize = fileSize
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
+        self.cameraModel = cameraModel
+        self.lensModel = lensModel
+        self.iso = iso
+        self.shutterSpeed = shutterSpeed
+        self.aperture = aperture
+        self.focalLength = focalLength
         self.ratingRaw = 0
         self.flagRaw = FlagState.none.rawValue
         self.colorLabelRaw = ColorLabel.none.rawValue
         self.stages = [Stage(kind: .single, name: "Single", asset: self)]
+    }
+
+    /// `"1/250s"` below one second (Lightroom/camera-app convention — a raw decimal like `0.004s`
+    /// is unreadable at a glance), `"2.5s"` at or above one second. Trailing zeroes trimmed so a
+    /// clean fraction like 1/250 doesn't print as `1/250.0s`.
+    public var shutterSpeedDisplay: String {
+        guard shutterSpeed > 0 else { return "" }
+        if shutterSpeed >= 1 {
+            return "\(shutterSpeed.formatted(.number.precision(.fractionLength(0...1))))s"
+        }
+        let denominator = (1 / shutterSpeed).rounded()
+        return "1/\(Int(denominator))s"
+    }
+
+    public var apertureDisplay: String {
+        guard aperture > 0 else { return "" }
+        return "f/\(aperture.formatted(.number.precision(.fractionLength(0...1))))"
+    }
+
+    public var isoDisplay: String {
+        guard iso > 0 else { return "" }
+        return "ISO \(iso)"
+    }
+
+    public var focalLengthDisplay: String {
+        guard focalLength > 0 else { return "" }
+        return "\(focalLength.formatted(.number.precision(.fractionLength(0...1))))mm"
     }
 
     /// Bookmarks survive file moves/renames within the same volume; the raw path is the
