@@ -29,7 +29,7 @@ public struct RawBaseParameters: Equatable, Sendable {
     public static let none = RawBaseParameters()
 }
 
-/// One stage's worth of the four *stackable* `CIColorKernel` modules. `RawImageRenderer` runs one
+/// One stage's worth of the five *stackable* `CIColorKernel` modules. `RawImageRenderer` runs one
 /// of these per active stage (Scene, then Single, then Custom stages in order), each feeding its
 /// output forward as the next stage's input — a real sequential composite, not a merged parameter
 /// set. That's a deliberate choice, not just the simplest option: these modules are nonlinear
@@ -38,6 +38,9 @@ public struct RawBaseParameters: Equatable, Sendable {
 /// masking needs the sequential form anyway — a masked stage limits which pixels its pass touches,
 /// which has no meaning as a merged parameter set.
 public struct StageParameters: Equatable, Sendable {
+    /// `nil` means "no dehaze". Applied first, ahead of every creative-grading module — haze
+    /// removal is a basic-panel correction, not a grade (see `DehazeParameters`).
+    public var dehaze: DehazeParameters?
     /// `nil` means "no filmic tone curve" — the Phase 2 passthrough behavior. Set to enable the
     /// filmic RGB module (see `FilmicRGBParameters`).
     public var filmicRGB: FilmicRGBParameters?
@@ -49,26 +52,41 @@ public struct StageParameters: Equatable, Sendable {
     /// two hue-driven grading tools, both ahead of the final tone curve (see
     /// `ColorZonesParameters`).
     public var colorZones: ColorZonesParameters?
-    /// `nil` means "no RGB curve". Applied last — the final tonal shaping pass, matching where a
-    /// Lightroom-style tone curve sits in most editors (see `RGBCurveParameters`).
+    /// `nil` means "no RGB curve". Applied after `colorZones` — the final tonal shaping pass,
+    /// matching where a Lightroom-style tone curve sits in most editors (see
+    /// `RGBCurveParameters`).
     public var rgbCurve: RGBCurveParameters?
+    /// `nil` means "no 3D LUT". Applied last, after every other grading pass — a "film
+    /// simulation"/creative-look grade layered on top of the already-graded image, matching how
+    /// LUT packs from VSCO/RNI/etc. are meant to be used (see `LUT3DParameters`).
+    public var lut3D: LUT3DParameters?
+    /// A grayscale mask PNG (white = fully affected, black = unaffected) limiting which pixels
+    /// this stage's kernel passes touch — `nil` means the stage applies to the whole image. See
+    /// `RawImageRenderer.applyStage(_:to:)` for how it's composited.
+    public var maskData: Data?
 
     public init(
+        dehaze: DehazeParameters? = nil,
         filmicRGB: FilmicRGBParameters? = nil,
         colorBalanceRGB: ColorBalanceRGBParameters? = nil,
         colorZones: ColorZonesParameters? = nil,
-        rgbCurve: RGBCurveParameters? = nil
+        rgbCurve: RGBCurveParameters? = nil,
+        lut3D: LUT3DParameters? = nil,
+        maskData: Data? = nil
     ) {
+        self.dehaze = dehaze
         self.filmicRGB = filmicRGB
         self.colorBalanceRGB = colorBalanceRGB
         self.colorZones = colorZones
         self.rgbCurve = rgbCurve
+        self.lut3D = lut3D
+        self.maskData = maskData
     }
 
     /// True when this stage contributes no kernel passes at all — the render loop can skip it
-    /// entirely rather than running four no-op checks.
+    /// entirely rather than running through the no-op checks.
     public var isEmpty: Bool {
-        filmicRGB == nil && colorBalanceRGB == nil && colorZones == nil && rgbCurve == nil
+        dehaze == nil && filmicRGB == nil && colorBalanceRGB == nil && colorZones == nil && rgbCurve == nil && lut3D == nil
     }
 
     public static let none = StageParameters()

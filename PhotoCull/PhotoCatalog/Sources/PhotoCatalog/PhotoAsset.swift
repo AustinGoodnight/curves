@@ -44,11 +44,35 @@ public final class PhotoAsset {
     public var editNeutralTint: Double?
     public var editSharpnessAmount: Double?
 
+    /// Module bypass switches for the two asset-level (non-stackable) groups in
+    /// `ColorBalanceBarView` — "WB" and "Detail". `true` (the default) means apply whatever's
+    /// stored above/on the relevant `Stage`; `false` renders as if untouched (native as-shot WB;
+    /// native sharpness; no Dehaze contribution from any stage) without discarding the stored
+    /// values, so re-enabling restores exactly what was there. Asset-level (not per-`Stage`, unlike
+    /// the four kernel-module `isEnabled` switches on `Stage`) because every field they gate —
+    /// Temp/Tint/Sharpness — already lives directly on `PhotoAsset` for the same "not stackable per
+    /// stage" reason (see the doc comment above); "Detail" additionally suppresses Dehaze's
+    /// contribution from every active `Stage` uniformly rather than per-stage, since there's no
+    /// single "the stage this toggle belongs to" once more than one stage is active at once.
+    public var editWhiteBalanceEnabled: Bool = true
+    public var editDetailEnabled: Bool = true
+
     /// Owns this photo's `.single` stage (always present, index 0) and any `.custom` stages the
     /// user has added. The shared `.scene` stage lives on `PhotoScene` instead — see `Stage`'s
     /// doc comment.
     @Relationship(deleteRule: .cascade, inverse: \Stage.asset)
     public var stages: [Stage]? = []
+
+    /// Named checkpoints of this photo's edit state — see `AssetVersion`'s doc comment. Unordered
+    /// storage; `StagesSidebarView` sorts by `createdDate` for display.
+    @Relationship(deleteRule: .cascade, inverse: \AssetVersion.asset)
+    public var versions: [AssetVersion]? = []
+    /// The version currently "checked out" — git's HEAD, essentially. `nil` means the live edit
+    /// state isn't known to match any saved version (the common case: mid-edit, or no version
+    /// saved yet). A plain `UUID`, not a relationship, so deleting the `AssetVersion` it points to
+    /// doesn't need a cascade/nullify rule of its own — `StagesSidebarView` clears this directly
+    /// when deleting the version it currently points at.
+    public var currentVersionID: UUID?
 
     /// The always-present, per-photo stage — created alongside this asset in `init` and never
     /// deleted or renamed. **Routed to `stack.singleStage` instead whenever `stack` is set**: a
@@ -63,11 +87,12 @@ public final class PhotoAsset {
         return stages?.first(where: { $0.kind == .single }) ?? Stage(kind: .single, name: "Single", asset: self)
     }
 
-    /// User-added stages, in display/composite order. Routed to `stack.customStages` whenever
-    /// `stack` is set — same sharing as `singleStage`, see its doc comment.
+    /// User-added stages (`.custom` and `.assistedMask`, interleaved in one shared `sortIndex`
+    /// sequence), in display/composite order. Routed to `stack.customStages` whenever `stack` is
+    /// set — same sharing as `singleStage`, see its doc comment.
     public var customStages: [Stage] {
         if let stack { return stack.customStages }
-        return (stages ?? []).filter { $0.kind == .custom }.sorted { $0.sortIndex < $1.sortIndex }
+        return (stages ?? []).filter { $0.kind == .custom || $0.kind == .assistedMask }.sorted { $0.sortIndex < $1.sortIndex }
     }
 
     public var rating: Int {

@@ -1,16 +1,21 @@
 import Foundation
 import SwiftData
 
-/// Which of the three (eventually four, once masking lands) roles a `Stage` plays. `.single` and
-/// `.scene` are structural — every `PhotoAsset`/`PhotoScene` has exactly one, created alongside
-/// its owner and never deleted or renamed. `.custom` stages are freely added/removed/renamed by
-/// the user. A stack doesn't get its own kind — see `PhotoStack.stages`'s doc comment for why a
-/// stacked photo's `.single`/`.custom` stages are the *same kind*, just owned by the stack instead
-/// of the asset.
+/// Which of the four roles a `Stage` plays. `.single` and `.scene` are structural — every
+/// `PhotoAsset`/`PhotoScene` has exactly one, created alongside its owner and never deleted or
+/// renamed. `.custom` and `.assistedMask` stages are freely added/removed/renamed by the user and
+/// share one `sortIndex` sequence (see `PhotoAsset.customStages`'s doc comment) — `.assistedMask`
+/// differs from `.custom` only in that it's created with `maskData` populated via the assisted
+/// mask editor (rough brush strokes refined to the photo's own edges by a guided filter — see
+/// `GuidedMaskRefiner` in the app target) rather than starting as a whole-image blank slate. A
+/// stack doesn't get its own kind — see `PhotoStack.stages`'s doc comment for why a stacked
+/// photo's `.single`/`.custom`/`.assistedMask` stages are the *same kind*, just owned by the stack
+/// instead of the asset.
 public enum StageKind: Int, Codable, Sendable {
     case single = 0
     case scene = 1
     case custom = 2
+    case assistedMask = 3
 }
 
 /// One independently-editable, non-destructive set of tone/color adjustments. A photo's rendered
@@ -27,12 +32,13 @@ public enum StageKind: Int, Codable, Sendable {
 /// stage is owned by a `PhotoScene` (`scene`) and applies to every photo in it, independently of
 /// stacking.
 ///
-/// Holds the four *stackable* kernel-module parameter groups that used to live directly on
-/// `PhotoAsset` (Filmic RGB, Color Balance RGB, RGB Curve, Color Zones) — see each field's doc
-/// comment there for the original rationale, unchanged by the move. Exposure/white-balance/
-/// sharpness stay on `PhotoAsset` itself rather than becoming per-stage: those are native
-/// `CIRAWFilter` inputs applied once during RAW decode, before any stage's kernel passes run, so
-/// they can't be meaningfully stacked per-stage the way the four `CIColorKernel` modules can.
+/// Holds the five *stackable* kernel-module parameter groups: Dehaze, plus the four that used to
+/// live directly on `PhotoAsset` (Filmic RGB, Color Balance RGB, RGB Curve, Color Zones) — see
+/// each field's doc comment there for the original rationale, unchanged by the move. Exposure/
+/// white-balance/sharpness stay on `PhotoAsset` itself rather than becoming per-stage: those are
+/// native `CIRAWFilter` inputs applied once during RAW decode, before any stage's kernel passes
+/// run, so they can't be meaningfully stacked per-stage the way the five `CIColorKernel` modules
+/// can.
 @Model
 public final class Stage {
     public var id: UUID = UUID()
@@ -48,19 +54,42 @@ public final class Stage {
     public var scene: PhotoScene?
     public var stack: PhotoStack?
 
-    /// Reserved for future region/brush masking — `nil` means the stage applies to the whole
-    /// image, matching every other module's "nil = no-op" convention in this codebase.
+    /// A grayscale PNG (white = fully affected, black = unaffected) limiting which pixels this
+    /// stage's kernel passes touch — `nil` means the stage applies to the whole image, matching
+    /// every other module's "nil = no-op" convention in this codebase. Populated by the assisted
+    /// mask editor for `.assistedMask` stages; `.custom` stages may also set it by the same
+    /// mechanism. Stored at a fixed working resolution independent of render size — see
+    /// `RawImageRenderer.applyStage(_:to:)` for how it's rescaled per render.
     public var maskData: Data?
+
+    /// `nil` means no haze removal — see `DehazeKernel`/`DehazeParameters` in `RawEngine`. No
+    /// separate `editDehazeEnabled` switch of its *own* — `nil`/0 is already a true no-op — but its
+    /// *group's* switch (`PhotoAsset.editDetailEnabled`, shared with Sharpness under the "Detail"
+    /// header in `ColorBalanceBarView`) can still suppress it; see that property's doc comment.
+    public var editDehazeAmount: Double?
 
     public var editFilmicEnabled: Bool = true
     public var editFilmicWhitePointSource: Double?
     public var editFilmicBlackPointSource: Double?
     public var editFilmicContrast: Double?
     public var editFilmicLatitude: Double?
+    /// Also gated by `editBalanceEnabled` (see its doc comment) despite living in the Filmic RGB
+    /// module rather than Color Balance RGB — `ColorBalanceBarView`'s "Balance" fader group spans
+    /// both kernels (Chroma/Vibrance here are Color Balance RGB fields; Saturation is this one).
     public var editFilmicSaturation: Double?
     public var editFilmicBalance: Double?
 
     public var editColorBalanceEnabled: Bool = true
+    /// Sub-group bypass switches, finer-grained than `editColorBalanceEnabled` above — that one
+    /// gates the whole `CIColorKernel` pass (returning `nil` from `colorBalanceParameters(for:)`
+    /// entirely); these two instead swap specific fields back to
+    /// `ColorBalanceRGBParameters.darktableDefault`'s neutral values while the pass still runs (so
+    /// e.g. Contrast, which has no group of its own, keeps applying independently of either). Named
+    /// for the two independently-toggleable clusters `ColorBalanceBarView.colorBalanceSection`
+    /// splits its fields into: "Color Wheels" (the 12 Y/C/H fields below) and "Balance" (Chroma/
+    /// Vibrance here, plus Filmic's Saturation — see `editFilmicSaturation`'s doc comment).
+    public var editColorWheelsEnabled: Bool = true
+    public var editBalanceEnabled: Bool = true
     public var editColorBalanceGlobalY: Double?
     public var editColorBalanceGlobalC: Double?
     public var editColorBalanceGlobalH: Double?
@@ -85,6 +114,18 @@ public final class Stage {
     public var editColorZonesLightnessPoints: [Double]?
     public var editColorZonesChromaPoints: [Double]?
     public var editColorZonesHuePoints: [Double]?
+
+    /// A loaded "film simulation" 3D LUT (`.cube` file), applied last in the stage's kernel
+    /// chain — see `RawImageRenderer.applyStage(_:to:)`. `lut3DData`/`lut3DSize` being `nil` means
+    /// no LUT is loaded, independent of `editLUT3DEnabled` (which just lets a loaded LUT be
+    /// bypassed without discarding it, matching every other module's bypass switch).
+    public var editLUT3DEnabled: Bool = true
+    /// Raw RGBA float32 bytes, red-fastest order — see `LUT3D.data`'s doc comment for the exact
+    /// layout. Stored pre-parsed so the original `.cube` file never needs to be re-read.
+    public var lut3DData: Data?
+    public var lut3DSize: Int?
+    public var lut3DTitle: String?
+    public var lut3DIntensity: Double?
 
     public var kind: StageKind {
         get { StageKind(rawValue: kindRaw) ?? .custom }

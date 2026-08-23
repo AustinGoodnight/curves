@@ -13,9 +13,9 @@ import RawEngine
 func rawBaseParameters(for asset: PhotoAsset) -> RawBaseParameters {
     RawBaseParameters(
         exposure: asset.editExposure,
-        neutralTemperature: asset.editNeutralTemperature,
-        neutralTint: asset.editNeutralTint,
-        sharpnessAmount: asset.editSharpnessAmount
+        neutralTemperature: asset.editWhiteBalanceEnabled ? asset.editNeutralTemperature : nil,
+        neutralTint: asset.editWhiteBalanceEnabled ? asset.editNeutralTint : nil,
+        sharpnessAmount: asset.editDetailEnabled ? asset.editSharpnessAmount : nil
     )
 }
 
@@ -26,6 +26,14 @@ func rawBaseParameters(for asset: PhotoAsset) -> RawBaseParameters {
 /// not just semantics: these are `CIColorKernel(source:)`-based (the deprecated Core Image Kernel
 /// Language path, not native Metal), so running one at its defaults still pays for a full
 /// pixel-buffer pass through it.
+/// `nil` whenever the fader is untouched, dragged back to exactly 0, or its group's own switch
+/// (`detailEnabled`, `PhotoAsset.editDetailEnabled` — see its doc comment) is off — there's no
+/// separate per-field bypass switch for Dehaze itself (see `Stage.editDehazeAmount`'s doc comment).
+func dehazeParameters(for stage: Stage, detailEnabled: Bool) -> DehazeParameters? {
+    guard detailEnabled, let amount = stage.editDehazeAmount, amount != 0 else { return nil }
+    return DehazeParameters(amount: amount)
+}
+
 func filmicParameters(for stage: Stage) -> FilmicRGBParameters? {
     guard stage.editFilmicEnabled else { return nil }
     let d = FilmicRGBParameters.darktableDefault
@@ -34,29 +42,39 @@ func filmicParameters(for stage: Stage) -> FilmicRGBParameters? {
         whitePointSource: stage.editFilmicWhitePointSource ?? d.whitePointSource,
         latitude: stage.editFilmicLatitude ?? d.latitude,
         contrast: stage.editFilmicContrast ?? d.contrast,
-        saturation: stage.editFilmicSaturation ?? d.saturation,
+        saturation: stage.editBalanceEnabled ? (stage.editFilmicSaturation ?? d.saturation) : d.saturation,
         balance: stage.editFilmicBalance ?? d.balance
     )
 }
 
+/// Builds every `ColorBalanceRGBParameters` field from `stage`'s stored edits, except that the
+/// "Color Wheels" group (12 Y/C/H fields) and the "Balance" group (Chroma/Vibrance) each fall back
+/// to `ColorBalanceRGBParameters.darktableDefault`'s neutral value — not just the stored edit's own
+/// `?? default` fallback, but unconditionally — whenever that group's own switch
+/// (`editColorWheelsEnabled`/`editBalanceEnabled`) is off, same as `editColorBalanceEnabled`
+/// already does for the whole struct but scoped to just that group's fields. Contrast has no group
+/// switch of its own (it's a sidebar control, not part of either bar group) and always uses its
+/// stored edit regardless.
 func colorBalanceParameters(for stage: Stage) -> ColorBalanceRGBParameters? {
     guard stage.editColorBalanceEnabled else { return nil }
     let d = ColorBalanceRGBParameters.darktableDefault
+    let wheels = stage.editColorWheelsEnabled
+    let balance = stage.editBalanceEnabled
     return ColorBalanceRGBParameters(
-        shadowsY: stage.editColorBalanceShadowsY ?? d.shadowsY,
-        shadowsC: stage.editColorBalanceShadowsC ?? d.shadowsC,
-        shadowsH: stage.editColorBalanceShadowsH ?? d.shadowsH,
-        midtonesY: stage.editColorBalanceMidtonesY ?? d.midtonesY,
-        midtonesC: stage.editColorBalanceMidtonesC ?? d.midtonesC,
-        midtonesH: stage.editColorBalanceMidtonesH ?? d.midtonesH,
-        highlightsY: stage.editColorBalanceHighlightsY ?? d.highlightsY,
-        highlightsC: stage.editColorBalanceHighlightsC ?? d.highlightsC,
-        highlightsH: stage.editColorBalanceHighlightsH ?? d.highlightsH,
-        globalY: stage.editColorBalanceGlobalY ?? d.globalY,
-        globalC: stage.editColorBalanceGlobalC ?? d.globalC,
-        globalH: stage.editColorBalanceGlobalH ?? d.globalH,
-        chromaGlobal: stage.editColorBalanceChromaGlobal ?? d.chromaGlobal,
-        vibrance: stage.editColorBalanceVibrance ?? d.vibrance,
+        shadowsY: wheels ? (stage.editColorBalanceShadowsY ?? d.shadowsY) : d.shadowsY,
+        shadowsC: wheels ? (stage.editColorBalanceShadowsC ?? d.shadowsC) : d.shadowsC,
+        shadowsH: wheels ? (stage.editColorBalanceShadowsH ?? d.shadowsH) : d.shadowsH,
+        midtonesY: wheels ? (stage.editColorBalanceMidtonesY ?? d.midtonesY) : d.midtonesY,
+        midtonesC: wheels ? (stage.editColorBalanceMidtonesC ?? d.midtonesC) : d.midtonesC,
+        midtonesH: wheels ? (stage.editColorBalanceMidtonesH ?? d.midtonesH) : d.midtonesH,
+        highlightsY: wheels ? (stage.editColorBalanceHighlightsY ?? d.highlightsY) : d.highlightsY,
+        highlightsC: wheels ? (stage.editColorBalanceHighlightsC ?? d.highlightsC) : d.highlightsC,
+        highlightsH: wheels ? (stage.editColorBalanceHighlightsH ?? d.highlightsH) : d.highlightsH,
+        globalY: wheels ? (stage.editColorBalanceGlobalY ?? d.globalY) : d.globalY,
+        globalC: wheels ? (stage.editColorBalanceGlobalC ?? d.globalC) : d.globalC,
+        globalH: wheels ? (stage.editColorBalanceGlobalH ?? d.globalH) : d.globalH,
+        chromaGlobal: balance ? (stage.editColorBalanceChromaGlobal ?? d.chromaGlobal) : d.chromaGlobal,
+        vibrance: balance ? (stage.editColorBalanceVibrance ?? d.vibrance) : d.vibrance,
         contrast: stage.editColorBalanceContrast ?? d.contrast
     )
 }
@@ -94,12 +112,23 @@ func colorZonesParameters(for stage: Stage) -> ColorZonesParameters? {
     )
 }
 
-func stageParameters(for stage: Stage) -> StageParameters {
+/// `nil` whenever no LUT is loaded (`lut3DData`/`lut3DSize` unset), regardless of
+/// `editLUT3DEnabled` — a bypass switch has nothing to bypass until a LUT exists.
+func lut3DParameters(for stage: Stage) -> LUT3DParameters? {
+    guard stage.editLUT3DEnabled, let data = stage.lut3DData, let size = stage.lut3DSize, size >= 2 else { return nil }
+    let lut = LUT3D(size: size, data: data, title: stage.lut3DTitle)
+    return LUT3DParameters(lut: lut, intensity: stage.lut3DIntensity ?? 1)
+}
+
+func stageParameters(for stage: Stage, detailEnabled: Bool) -> StageParameters {
     StageParameters(
+        dehaze: dehazeParameters(for: stage, detailEnabled: detailEnabled),
         filmicRGB: filmicParameters(for: stage),
         colorBalanceRGB: colorBalanceParameters(for: stage),
         colorZones: colorZonesParameters(for: stage),
-        rgbCurve: rgbCurveParameters(for: stage)
+        rgbCurve: rgbCurveParameters(for: stage),
+        lut3D: lut3DParameters(for: stage),
+        maskData: stage.maskData
     )
 }
 
@@ -128,15 +157,23 @@ func activeStageStack(for asset: PhotoAsset) -> [Stage] {
 /// already-computed array (see `EditorView.activeStages`) rather than recomputing it via
 /// `activeStageStack(for:)` here — that walks relationships and is too expensive to redo on every
 /// single slider-drag tick.
+/// `history` is `nil` at the few call sites that make a *structural* change (add/delete/rename a
+/// stage, flip a stage's own `isEnabled`) — see `EditHistory`'s doc comment for why those aren't
+/// undoable. Every value-level call site passes its `EditHistory` so the edit is undoable.
 @MainActor
-func scheduleRender(for asset: PhotoAsset, activeStages: [Stage], coordinator: EditorRenderCoordinator) {
+func scheduleRender(for asset: PhotoAsset, activeStages: [Stage], coordinator: EditorRenderCoordinator, history: EditHistory? = nil) {
+    history?.registerChange(asset: asset, activeStages: activeStages)
     coordinator.scheduleRender(
         baseParams: rawBaseParameters(for: asset),
-        stageStack: activeStages.map(stageParameters(for:))
+        stageStack: activeStages.map { stageParameters(for: $0, detailEnabled: asset.editDetailEnabled) }
     )
 }
 
 // MARK: - Has-edits
+
+func dehazeHasEdits(_ stage: Stage) -> Bool {
+    stage.editDehazeAmount != nil
+}
 
 func filmicHasEdits(_ stage: Stage) -> Bool {
     !stage.editFilmicEnabled
@@ -146,7 +183,7 @@ func filmicHasEdits(_ stage: Stage) -> Bool {
 }
 
 func colorBalanceHasEdits(_ stage: Stage) -> Bool {
-    !stage.editColorBalanceEnabled
+    !stage.editColorBalanceEnabled || !stage.editColorWheelsEnabled || !stage.editBalanceEnabled
         || stage.editColorBalanceGlobalY != nil || stage.editColorBalanceGlobalC != nil || stage.editColorBalanceGlobalH != nil
         || stage.editColorBalanceShadowsY != nil || stage.editColorBalanceShadowsC != nil || stage.editColorBalanceShadowsH != nil
         || stage.editColorBalanceMidtonesY != nil || stage.editColorBalanceMidtonesC != nil || stage.editColorBalanceMidtonesH != nil
@@ -164,10 +201,15 @@ func colorZonesHasEdits(_ stage: Stage) -> Bool {
         || stage.editColorZonesHuePoints != nil
 }
 
+func lut3DHasEdits(_ stage: Stage) -> Bool {
+    stage.lut3DData != nil || !stage.editLUT3DEnabled || stage.lut3DIntensity != nil
+}
+
 /// Whether `stage` itself carries any adjustments — used to grey out per-stage reset buttons and
 /// (via `hasAnyEdits`) "Reset All".
 func stageHasEdits(_ stage: Stage) -> Bool {
-    filmicHasEdits(stage) || colorBalanceHasEdits(stage) || rgbCurveHasEdits(stage) || colorZonesHasEdits(stage)
+    dehazeHasEdits(stage) || filmicHasEdits(stage) || colorBalanceHasEdits(stage) || rgbCurveHasEdits(stage)
+        || colorZonesHasEdits(stage) || lut3DHasEdits(stage)
 }
 
 /// Whether there's anything for "Reset All" to do — the asset's base params plus whichever stage
@@ -176,10 +218,15 @@ func stageHasEdits(_ stage: Stage) -> Bool {
 /// editing model (see `Stage`'s doc comment).
 func hasAnyEdits(asset: PhotoAsset, stage: Stage) -> Bool {
     asset.editExposure != nil || asset.editNeutralTemperature != nil || asset.editNeutralTint != nil
-        || asset.editSharpnessAmount != nil || stageHasEdits(stage)
+        || asset.editSharpnessAmount != nil || !asset.editWhiteBalanceEnabled || !asset.editDetailEnabled
+        || stageHasEdits(stage)
 }
 
 // MARK: - Reset
+
+func resetDehaze(_ stage: Stage) {
+    stage.editDehazeAmount = nil
+}
 
 func resetFilmic(_ stage: Stage) {
     stage.editFilmicEnabled = true
@@ -193,6 +240,8 @@ func resetFilmic(_ stage: Stage) {
 
 func resetColorBalance(_ stage: Stage) {
     stage.editColorBalanceEnabled = true
+    stage.editColorWheelsEnabled = true
+    stage.editBalanceEnabled = true
     stage.editColorBalanceGlobalY = nil
     stage.editColorBalanceGlobalC = nil
     stage.editColorBalanceGlobalH = nil
@@ -223,13 +272,25 @@ func resetColorZones(_ stage: Stage) {
     stage.editColorZonesHuePoints = nil
 }
 
+func resetLUT3D(_ stage: Stage) {
+    stage.editLUT3DEnabled = true
+    stage.lut3DData = nil
+    stage.lut3DSize = nil
+    stage.lut3DTitle = nil
+    stage.lut3DIntensity = nil
+}
+
 func resetAllEdits(asset: PhotoAsset, stage: Stage) {
     asset.editExposure = nil
     asset.editNeutralTemperature = nil
     asset.editNeutralTint = nil
     asset.editSharpnessAmount = nil
+    asset.editWhiteBalanceEnabled = true
+    asset.editDetailEnabled = true
+    resetDehaze(stage)
     resetFilmic(stage)
     resetColorBalance(stage)
     resetRGBCurve(stage)
     resetColorZones(stage)
+    resetLUT3D(stage)
 }

@@ -17,6 +17,10 @@ struct EditorView: View {
     var onSelectAsset: (PhotoAsset) -> Void
 
     @State private var coordinator = EditorRenderCoordinator()
+    /// Cmd+Z/Cmd+Shift+Z undo/redo for value-level edits — see `EditHistory`'s doc comment for
+    /// scope. Seeded in `init` with this asset's starting values so the very first edit diffs
+    /// against the right baseline, and re-seeded in the `.task(id:)` below on every photo switch.
+    @State private var history: EditHistory
     /// Which stage's own values the controls currently show ("blank slate" editing — see
     /// `Stage`'s doc comment). Never affects what's rendered; the preview always composites
     /// `activeStages` regardless of this selection.
@@ -28,13 +32,22 @@ struct EditorView: View {
     /// changes: add/delete/enable-toggle. Editing a stage's own field values doesn't need a
     /// refresh — those still read fresh off the `Stage` objects already in this array.
     @State private var activeStages: [Stage]
+    /// Set while the assisted-mask editor is open for a stage — replaces the plain preview `Image`
+    /// in the image pane with `AssistedMaskEditorOverlay` for that stage. `nil` the rest of the
+    /// time; never affects what's rendered on its own (only writing `stage.maskData` via the
+    /// overlay's "Done" button does that).
+    @State private var maskEditingStage: Stage?
 
     init(asset: PhotoAsset, onSelectAsset: @escaping (PhotoAsset) -> Void) {
         self.asset = asset
         self.onSelectAsset = onSelectAsset
         let single = asset.singleStage
         _selectedStage = State(initialValue: single)
-        _activeStages = State(initialValue: activeStageStack(for: asset))
+        let stages = activeStageStack(for: asset)
+        _activeStages = State(initialValue: stages)
+        let history = EditHistory()
+        history.reset(asset: asset, activeStages: stages)
+        _history = State(initialValue: history)
     }
 
     var body: some View {
@@ -44,17 +57,26 @@ struct EditorView: View {
 
                 StagesSidebarView(
                     asset: asset, selectedStage: $selectedStage, activeStages: $activeStages, coordinator: coordinator,
-                    onSelectAsset: onSelectAsset
+                    history: history,
+                    onSelectAsset: onSelectAsset,
+                    onEditMask: { maskEditingStage = $0 }
                 )
                 .frame(minWidth: 160, idealWidth: 200, maxWidth: 280)
 
                 ZStack {
                     Color.editorPreviewBackground
-                    if let previewImage = coordinator.previewImage {
-                        Image(decorative: previewImage, scale: 1)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .padding()
+                    if let maskEditingStage, let previewImage = coordinator.previewImage {
+                        AssistedMaskEditorOverlay(
+                            stage: maskEditingStage,
+                            previewImage: previewImage,
+                            onFinished: {
+                                self.maskEditingStage = nil
+                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                            }
+                        )
+                    } else if let previewImage = coordinator.previewImage {
+                        ZoomableImagePane(previewImage: previewImage)
+                            .id(asset.filePath)
                     } else {
                         ProgressView("Decoding RAW…")
                             .tint(.white)
@@ -64,20 +86,27 @@ struct EditorView: View {
                 .frame(minWidth: 480, minHeight: 400)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                EditorSidebarView(asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator)
+                EditorSidebarView(asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator, history: history)
             }
 
             ColorBalanceBarView(
-                asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator,
+                asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator, history: history,
                 wheelDiameter: wheelDiameter
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: asset.filePath) {
+            history.reset(asset: asset, activeStages: activeStages)
+            history.onRestore = {
+                coordinator.scheduleRender(
+                    baseParams: rawBaseParameters(for: asset),
+                    stageStack: activeStages.map { stageParameters(for: $0, detailEnabled: asset.editDetailEnabled) }
+                )
+            }
             await coordinator.loadAndRender(
                 url: asset.resolvedURL(),
                 baseParams: rawBaseParameters(for: asset),
-                stageStack: activeStages.map(stageParameters(for:))
+                stageStack: activeStages.map { stageParameters(for: $0, detailEnabled: asset.editDetailEnabled) }
             )
         }
     }
@@ -92,5 +121,115 @@ struct EditorView: View {
     /// that equal to `colorFaderTrackHeight` gives `diameter = colorFaderTrackHeight - 26`.
     private var wheelDiameter: CGFloat {
         colorFaderTrackHeight - 26
+    }
+}
+
+/// Pinch-to-zoom / drag-to-pan / double-click-to-toggle for the editor's main preview image. A
+/// separate `View` type (not inline in `EditorView.body`) specifically so `zoomScale`/`panOffset`
+/// live as `@State` on the smallest view that needs them — per this project's documented
+/// "frequently-mutated state living on the wrong view" trap, a pan drag mutating `@State` declared
+/// directly on `EditorView` would invalidate all of `EditorView.body` (filmstrip, both sidebars,
+/// color balance bar) on every drag tick. `previewImage` itself changes on every render tick
+/// (including mid-slider-drag draft renders) — zoom/pan state must *not* reset on that, only on
+/// switching to a different photo, which the call site handles via `.id(asset.filePath)`.
+private struct ZoomableImagePane: View {
+    let previewImage: CGImage
+
+    @State private var zoomScale: CGFloat = 1
+    @State private var panOffset: CGSize = .zero
+    @State private var gestureZoomScale: CGFloat = 1
+    @State private var gesturePanOffset: CGSize = .zero
+
+    private let minZoom: CGFloat = 1
+    private let maxZoom: CGFloat = 8
+    private let doubleClickZoom: CGFloat = 2.5
+
+    private var imageSize: CGSize {
+        CGSize(width: previewImage.width, height: previewImage.height)
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let effectiveZoom = zoomScale * gestureZoomScale
+            Image(decorative: previewImage, scale: 1)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .scaleEffect(effectiveZoom)
+                .offset(
+                    x: panOffset.width + gesturePanOffset.width,
+                    y: panOffset.height + gesturePanOffset.height
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
+                .contentShape(Rectangle())
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { value in
+                            gestureZoomScale = value
+                        }
+                        .onEnded { value in
+                            zoomScale = min(maxZoom, max(minZoom, zoomScale * value))
+                            gestureZoomScale = 1
+                            panOffset = clampedPan(panOffset, zoom: zoomScale, containerSize: geometry.size)
+                        }
+                )
+                .simultaneousGesture(
+                    DragGesture()
+                        .onChanged { value in
+                            gesturePanOffset = value.translation
+                        }
+                        .onEnded { value in
+                            panOffset = clampedPan(
+                                CGSize(width: panOffset.width + value.translation.width, height: panOffset.height + value.translation.height),
+                                zoom: zoomScale, containerSize: geometry.size
+                            )
+                            gesturePanOffset = .zero
+                        }
+                )
+                .simultaneousGesture(
+                    SpatialTapGesture(count: 2)
+                        .onEnded { _ in
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                if zoomScale > minZoom + 0.01 {
+                                    zoomScale = minZoom
+                                    panOffset = .zero
+                                } else {
+                                    zoomScale = doubleClickZoom
+                                    panOffset = clampedPan(.zero, zoom: doubleClickZoom, containerSize: geometry.size)
+                                }
+                            }
+                        }
+                )
+
+            if zoomScale > minZoom + 0.01 {
+                Text("\(Int(zoomScale * 100))%")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.thinMaterial, in: Capsule())
+                    .padding(12)
+                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .bottomTrailing)
+                    .allowsHitTesting(false)
+            }
+        }
+        .padding()
+    }
+
+    /// Clamps `offset` so the zoomed image never pans far enough to leave a gap between its edge
+    /// and the container's — computed from the aspect-fit size at `zoom == 1`, not `imageSize`
+    /// directly, since the image is letterboxed to fit the container before any zoom is applied.
+    private func clampedPan(_ offset: CGSize, zoom: CGFloat, containerSize: CGSize) -> CGSize {
+        guard imageSize.width > 0, imageSize.height > 0, containerSize.width > 0, containerSize.height > 0 else {
+            return .zero
+        }
+        let fitScale = min(containerSize.width / imageSize.width, containerSize.height / imageSize.height)
+        let displayedSize = CGSize(width: imageSize.width * fitScale * zoom, height: imageSize.height * fitScale * zoom)
+        let maxX = max(0, (displayedSize.width - containerSize.width) / 2)
+        let maxY = max(0, (displayedSize.height - containerSize.height) / 2)
+        return CGSize(
+            width: min(max(offset.width, -maxX), maxX),
+            height: min(max(offset.height, -maxY), maxY)
+        )
     }
 }

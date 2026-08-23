@@ -22,7 +22,8 @@ struct RGBHistogramView: View {
             fill(data.b, color: Self.blueColor, in: &context, size: size)
         }
         .frame(height: height)
-        .background(Color.primary.opacity(0.05))
+        // No fill — matches `CurveEditorControl`'s plain RGB Curve graph, which also sits
+        // directly on the sidebar's own background with only a stroke marking its bounds.
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.2), lineWidth: 1))
     }

@@ -18,10 +18,13 @@ func resetButton(disabled: Bool, action: @escaping () -> Void) -> some View {
 /// target than the switch alone, which stays put right next to it as the actual state indicator
 /// (tapping the title doesn't remove the visual "is this on" feedback, it just gives a second way
 /// to flip it). Plain, non-interactive text when `enabled` is `nil` — a title with nothing to
-/// toggle shouldn't look/feel clickable.
-func sectionTitle(_ title: String, enabled: Binding<Bool>?) -> some View {
+/// toggle shouldn't look/feel clickable. `font` defaults to the size every full module header uses
+/// (Filmic RGB, Curve, Color Balance RGB, …) — `ColorBalanceBarView` overrides it smaller for
+/// "Color Zones"/"Film Simulation" so they read as the same weight as its own `titledGroup` labels
+/// (WB/Color Wheels/Balance) sharing that row, rather than needing a second near-duplicate helper.
+func sectionTitle(_ title: String, enabled: Binding<Bool>?, font: Font = .subheadline.weight(.semibold)) -> some View {
     Text(title)
-        .font(.subheadline.weight(.semibold))
+        .font(font)
         .foregroundStyle(.secondary)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -83,6 +86,15 @@ func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>,
 /// other way around) so the color wheels come out the same height as these, not vice versa.
 let colorFaderTrackHeight: CGFloat = 200
 
+/// Fixed width for every vertical fader's title-plus-track column (`verticalGradientSlider`/
+/// `verticalCircleSlider`) — wide enough to fit the longest label ("Dehaze") without wrapping.
+/// Without this, each column's `VStack` sizes itself to its own widest child, and since the
+/// track itself is only 18pt wide, that child is the title `Text` — so "Chr"/"Sharp"/"Dehaze"
+/// each produced a different column width purely from their own label's character count, even
+/// though every track underneath rendered at the same 18pt. Pinning one shared width here is
+/// what actually makes every fader column read as the same size next to its neighbors.
+private let faderColumnWidth: CGFloat = 48
+
 /// Labeled wrapper around `VerticalGradientSlider` — title above, value pill below, matching the
 /// chrome `slider()` puts around `MinimalSlider`. `valueText` empty skips the pill entirely
 /// rather than rendering an empty box.
@@ -111,4 +123,70 @@ func verticalGradientSlider(
                 .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
         }
     }
+    .frame(width: faderColumnWidth)
+}
+
+/// Labeled wrapper around `XYWhiteBalanceControl` — title above (mimicking a single fader
+/// column's own caption, at the same font/spacing `verticalGradientSlider`'s `Text(title)` uses,
+/// so `titledGroup`'s `.contentTop` alignment guide — tuned against that exact caption height —
+/// still lands on the pad itself), value pills for Temp/Tint below instead of one.
+func xyWhiteBalanceControl(
+    temperature: Binding<Double>,
+    tint: Binding<Double>,
+    temperatureRange: ClosedRange<Double>,
+    tintRange: ClosedRange<Double>,
+    defaultTemperature: Double,
+    defaultTint: Double,
+    temperatureText: String,
+    tintText: String
+) -> some View {
+    VStack(spacing: 8) {
+        Text("White Balance")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize()
+        XYWhiteBalanceControl(
+            temperature: temperature, tint: tint,
+            temperatureRange: temperatureRange, tintRange: tintRange,
+            defaultTemperature: defaultTemperature, defaultTint: defaultTint
+        )
+        HStack(spacing: 6) {
+            Text(temperatureText)
+            Text(tintText)
+        }
+        .font(.caption)
+        .monospacedDigit()
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+    }
+}
+
+/// Labeled wrapper around `VerticalCircleSlider` — same title-above/value-pill-below chrome as
+/// `verticalGradientSlider`, for the outline-track/circle-thumb style instead.
+func verticalCircleSlider(
+    _ title: String,
+    value: Binding<Double>,
+    range: ClosedRange<Double>,
+    valueText: String,
+    trackHeight: CGFloat = colorFaderTrackHeight,
+    resetValue: Double? = nil
+) -> some View {
+    VStack(spacing: 8) {
+        Text(title)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize()
+        VerticalCircleSlider(value: value, range: range, resetValue: resetValue)
+            .frame(height: trackHeight)
+        if !valueText.isEmpty {
+            Text(valueText)
+                .font(.caption)
+                .monospacedDigit()
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+        }
+    }
+    .frame(width: faderColumnWidth)
 }

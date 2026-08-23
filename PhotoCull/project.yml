@@ -21,6 +21,7 @@ targets:
       - package: RawEngine
     settings:
       base:
+        PRODUCT_NAME: Curves
         PRODUCT_BUNDLE_IDENTIFIER: com.austingoodnight.PhotoCull
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
@@ -32,7 +33,8 @@ targets:
         DEVELOPMENT_TEAM: ""
         ENABLE_HARDENED_RUNTIME: "NO"
         GENERATE_INFOPLIST_FILE: "YES"
-        INFOPLIST_KEY_CFBundleDisplayName: PhotoCull
+        INFOPLIST_KEY_CFBundleDisplayName: Curves
+        INFOPLIST_KEY_CFBundleName: Curves
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.photography
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         INFOPLIST_KEY_NSPrincipalClass: NSApplication

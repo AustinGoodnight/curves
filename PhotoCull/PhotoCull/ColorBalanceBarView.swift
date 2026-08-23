@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import PhotoCatalog
 import RawEngine
 
@@ -40,11 +41,21 @@ struct ColorBalanceBarView: View {
     /// `EditorView.activeStages`'s doc comment for why this isn't recomputed here.
     let activeStages: [Stage]
     let coordinator: EditorRenderCoordinator
+    let history: EditHistory
     let wheelDiameter: CGFloat
+
+    @Environment(\.modelContext) private var modelContext
+
+    /// Set in Settings (`SettingsView`) — whether the WB group below renders as the classic
+    /// Temp/Tint fader pair or the single `XYWhiteBalanceControl` pad. Not per-photo state.
+    @AppStorage(AppSettingsKey.whiteBalanceControlStyle) private var whiteBalanceStyle: WhiteBalanceControlStyle = .classic
 
     /// Which of the 3 color-zones curves is currently shown in the EQ graph. 2 (hue) matches
     /// darktable's own default "select by" channel.
     @State private var colorZonesChannel = 2
+    /// Set when `LUT3DLoader` throws while importing a `.cube` file, surfaced via `.alert`; `nil`
+    /// means no error is showing.
+    @State private var lut3DImportError: String?
 
     /// Height of `colorZonesSection`'s picker/reset/toggle toolbar row — a segmented `Picker` at
     /// default control size. Purely cosmetic now (a stable row height rather than one that shifts
@@ -68,47 +79,65 @@ struct ColorBalanceBarView: View {
         HStack(alignment: .contentTop, spacing: 32) {
             colorBalanceSection
             colorZonesSection
+            detailSection
+            lut3DSection
             Spacer(minLength: 0)
         }
         .fixedSize(horizontal: false, vertical: true)
-        .padding(24)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 24)
+        .padding(.top, 8)
         .toggleStyle(.switch)
         .disabled(!coordinator.isReady)
         .background(Color.sidebarBackground)
     }
 
-    /// No title/reset/enabled-toggle row anymore — Color Balance RGB is always active now (each
-    /// wheel and fader already double-click-resets individually, so the module-wide reset button
-    /// stopped earning its keep once that landed). But every individual fader/wheel still has its
-    /// own small title *above* its track/dial (`verticalGradientSlider`, `ColorWheelControl`), so
-    /// this section's real content — the tracks/dials themselves — doesn't start at its own top
-    /// edge; it starts `perControlTitleHeight` below it. The `.contentTop` guide accounts for
-    /// that explicitly rather than assuming `.top` already points at the right place.
+    /// No reset button for Color Balance RGB as a whole (each wheel and fader already double-
+    /// click-resets individually, so a module-wide reset never earned its keep). Its three
+    /// sub-groups (white balance, the four wheels, chroma/vibrance/saturation) each get their own
+    /// small label plus a `StoplightToggle` via `titledGroup`, so the row doesn't read as one
+    /// undifferentiated wall of controls and each cluster can be bypassed independently — see
+    /// `Stage.editColorWheelsEnabled`/`editBalanceEnabled` and `PhotoAsset.editWhiteBalanceEnabled`.
     ///
     /// `.fixedSize(horizontal:)` pins this to its own ideal content width — without it, a
     /// `Spacer()`-bearing row here would make this whole section report an unbounded/flexible
     /// width upward to `body`'s `HStack`, the same failure mode as the `Divider` height bug noted
     /// on `body` but on the width axis: in a wide (e.g. full-screen) window this section would
     /// eat the leftover width meant for the trailing `Spacer`, shoving `colorZonesSection` far to
-    /// the right with a dead gap in between. No such row remains now that the header's gone, but
-    /// this stays as cheap insurance against the same failure mode returning.
+    /// the right with a dead gap in between.
     private var colorBalanceSection: some View {
         HStack(alignment: .top, spacing: 28) {
-                HStack(alignment: .top, spacing: 20) {
-                    verticalGradientSlider(
-                        "Temp", value: bind(\.editNeutralTemperature, fallback: coordinator.renderer.defaultNeutralTemperature),
-                        range: 2000...12000, gradient: .neutralTemperature,
-                        valueText: "\(Int((asset.editNeutralTemperature ?? coordinator.renderer.defaultNeutralTemperature).rounded()))K",
-                        resetValue: coordinator.renderer.defaultNeutralTemperature
-                    )
-                    verticalGradientSlider(
-                        "Tint", value: bind(\.editNeutralTint, fallback: coordinator.renderer.defaultNeutralTint),
-                        range: -150...150, gradient: .neutralTint,
-                        valueText: formattedTint(asset.editNeutralTint ?? coordinator.renderer.defaultNeutralTint),
-                        resetValue: coordinator.renderer.defaultNeutralTint
+            titledGroup("WB", enabled: assetBoolBind(\.editWhiteBalanceEnabled)) {
+                switch whiteBalanceStyle {
+                case .classic:
+                    HStack(alignment: .top, spacing: 20) {
+                        verticalGradientSlider(
+                            "Temp", value: bind(\.editNeutralTemperature, fallback: coordinator.renderer.defaultNeutralTemperature),
+                            range: 2000...12000, gradient: .neutralTemperature,
+                            valueText: "\(Int((asset.editNeutralTemperature ?? coordinator.renderer.defaultNeutralTemperature).rounded()))K",
+                            resetValue: coordinator.renderer.defaultNeutralTemperature
+                        )
+                        verticalGradientSlider(
+                            "Tint", value: bind(\.editNeutralTint, fallback: coordinator.renderer.defaultNeutralTint),
+                            range: -150...150, gradient: .neutralTint,
+                            valueText: formattedTint(asset.editNeutralTint ?? coordinator.renderer.defaultNeutralTint),
+                            resetValue: coordinator.renderer.defaultNeutralTint
+                        )
+                    }
+                case .xy:
+                    xyWhiteBalanceControl(
+                        temperature: bind(\.editNeutralTemperature, fallback: coordinator.renderer.defaultNeutralTemperature),
+                        tint: bind(\.editNeutralTint, fallback: coordinator.renderer.defaultNeutralTint),
+                        temperatureRange: 2000...12000, tintRange: -150...150,
+                        defaultTemperature: coordinator.renderer.defaultNeutralTemperature,
+                        defaultTint: coordinator.renderer.defaultNeutralTint,
+                        temperatureText: "\(Int((asset.editNeutralTemperature ?? coordinator.renderer.defaultNeutralTemperature).rounded()))K",
+                        tintText: formattedTint(asset.editNeutralTint ?? coordinator.renderer.defaultNeutralTint)
                     )
                 }
+            }
 
+            titledGroup("Color Wheels", enabled: stageBoolBind(\.editColorWheelsEnabled)) {
                 // Wheel edge = darktable's own GUI "soft range" per zone, not the parameter's
                 // hard 0...1 max — see ColorWheelControl's doc comment.
                 // Negative: each wheel's own bounding box now includes empty margin on all
@@ -141,7 +170,9 @@ struct ColorBalanceBarView: View {
                         maxChroma: 0.2, yRange: -0.5...0.5
                     )
                 }
+            }
 
+            titledGroup("Balance", enabled: stageBoolBind(\.editBalanceEnabled)) {
                 HStack(alignment: .top, spacing: 26) {
                     // No value pill for now — see `verticalGradientSlider`'s doc comment; an
                     // empty `valueText` skips it rather than rendering a blank box. Their 2-
@@ -163,15 +194,97 @@ struct ColorBalanceBarView: View {
                         valueText: "", resetValue: FilmicRGBParameters.darktableDefault.saturation
                     )
                 }
+            }
         }
-        .alignmentGuide(.contentTop) { d in d[.top] + perControlTitleHeight }
         .fixedSize(horizontal: true, vertical: false)
     }
 
+    /// A sibling of `colorBalanceSection`/`colorZonesSection`/`lut3DSection`, not nested inside
+    /// `colorBalanceSection` — placed after Color Zones in `body`'s `HStack` rather than grouped
+    /// with the wheels/Balance faders. Uses `verticalCircleSlider` (outline track, circular
+    /// thumb) instead of `verticalGradientSlider` — an alternate fader style being tried here
+    /// before deciding whether to carry it elsewhere in the bar.
+    private var detailSection: some View {
+        titledGroup("Detail", enabled: assetBoolBind(\.editDetailEnabled)) {
+            HStack(alignment: .top, spacing: 26) {
+                // Sharpness is a native `CIRAWFilter` input (see `RawBaseParameters`), not a
+                // `Stage` field like Dehaze — same reason it's bound via `bind(...)` here instead
+                // of `stageBind(...)`, matching how Temp/Tint above are asset-level while the
+                // wheels/Balance faders are per-stage.
+                if coordinator.isReady && coordinator.renderer.isSharpnessSupported {
+                    verticalCircleSlider(
+                        "Sharp", value: bind(\.editSharpnessAmount, fallback: coordinator.renderer.defaultSharpnessAmount),
+                        range: 0...1, valueText: "", resetValue: coordinator.renderer.defaultSharpnessAmount
+                    )
+                }
+                verticalCircleSlider(
+                    "Dehaze", value: stageBind(\.editDehazeAmount, fallback: 0),
+                    range: 0...1, valueText: ""
+                )
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// Wraps `content` with a small group label centered above it — lighter than a module's own
+    /// `sectionTitle` (e.g. "Color Zones"), since this is a sub-group *within* Color Balance RGB,
+    /// not a module of its own. `.center`, not `.leading`: `content` (e.g. the 4-wheel row) is the
+    /// widest child and so defines the `VStack`'s own width regardless of alignment, but a
+    /// `.leading` title only ever sits flush with `content`'s *leading* edge (over "Global" alone,
+    /// not the wheel row as a whole) — `.center` is what actually centers the shorter title over
+    /// the wider row below it.
+    ///
+    /// The `.contentTop` guide goes on `content` itself, not the outer `VStack`, same technique
+    /// `colorZonesSection` uses for its own toolbar-row-plus-graph split — but unlike that graph,
+    /// every `content` passed here (`verticalGradientSlider`/`ColorWheelControl`) bundles its own
+    /// per-control mini-title (e.g. "Temp", "Global") *inside* the same view as its track/dial, so
+    /// `content`'s own `.top` lands on that mini-title, not the track/dial itself. `+
+    /// perControlTitleHeight` is what skips past it — dropping this (as an earlier pass here did)
+    /// still produces three `.contentTop` values that agree with each other, but all three land on
+    /// the mini-titles instead of the actual controls, which visibly landed the wheels/faders lower
+    /// than Color Zones' graph (whose `content` has no such inner label to skip).
+    ///
+    /// `enabled`, when passed, adds the same red/grey `StoplightToggle` "is this on" dot the other
+    /// modules (Color Zones, Film Simulation) show next to their own header — tap either the dot or
+    /// the title (via `sectionTitle`'s own tap-to-toggle) to flip it. The header row is pinned to
+    /// `colorZonesToolbarHeight`, same as those other modules' header rows, so adding the toggle
+    /// doesn't change this row's height across groups that do/don't have one — keeping every
+    /// section's header the same height is what keeps `perControlTitleHeight`'s tuned offset (below
+    /// this row, on `content`) still landing in the same place regardless of which groups opt in.
+    ///
+    /// The title stays centered over `content` below it even with the toggle attached — a leading
+    /// `Color.clear` spacer, exactly `stoplightHitDiameter` wide (matching `StoplightToggle`'s own
+    /// hit-frame width) with the same `spacing: 4` gap on both sides, balances the trailing dot out.
+    /// Without it, the `HStack` (title+dot) is centered as one block, which visibly drags the title
+    /// itself off-center to the left; this way only the dot ends up off-center, which is what
+    /// actually matches Color Zones/Film Simulation's own headers (title leading/centered, toggle
+    /// trailing, not the *pair* centered as a unit).
+    private func titledGroup<Content: View>(_ title: String, enabled: Binding<Bool>? = nil, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .center, spacing: 8) {
+            HStack(spacing: 4) {
+                if enabled != nil {
+                    Color.clear.frame(width: stoplightHitDiameter, height: stoplightHitDiameter)
+                }
+                sectionTitle(title, enabled: enabled, font: .caption.weight(.semibold))
+                if let enabled {
+                    StoplightToggle(isOn: enabled)
+                }
+            }
+            .frame(height: colorZonesToolbarHeight)
+            content()
+                .alignmentGuide(.contentTop) { d in d[.top] + perControlTitleHeight }
+        }
+    }
+
+    /// `StoplightToggle`'s own outer hit-frame width at its default `diameter` (10) — `diameter +
+    /// 12`, per its own layout, not configurable from outside. `titledGroup` uses this twice: once
+    /// for the toggle itself, once for the invisible balancing spacer on the title's other side.
+    private let stoplightHitDiameter: CGFloat = 22
+
     /// Single-line `.caption` title + the 8pt spacing above every fader's track and every wheel's
     /// dial (`verticalGradientSlider`'s and `ColorWheelControl`'s own `VStack(spacing: 8)`) — the
-    /// offset `colorBalanceSection`'s `.contentTop` guide needs to point past each control's own
-    /// title and land on its actual track/dial.
+    /// offset `titledGroup`'s `.contentTop` guide needs to point past each control's own title and
+    /// land on its actual track/dial.
     private let perControlTitleHeight: CGFloat = 22
 
     private func wheel(
@@ -192,15 +305,15 @@ struct ColorBalanceBarView: View {
             diameter: wheelDiameter,
             onHueChange: { newValue in
                 stage[keyPath: h] = newValue
-                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             },
             onChromaChange: { newValue in
                 stage[keyPath: c] = newValue
-                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             },
             onLuminanceChange: { newValue in
                 stage[keyPath: y] = newValue
-                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
         .equatable()
@@ -216,7 +329,7 @@ struct ColorBalanceBarView: View {
             get: { asset[keyPath: keyPath] ?? fallback },
             set: { newValue in
                 asset[keyPath: keyPath] = newValue
-                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
     }
@@ -226,7 +339,7 @@ struct ColorBalanceBarView: View {
             get: { stage[keyPath: keyPath] ?? fallback },
             set: { newValue in
                 stage[keyPath: keyPath] = newValue
-                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
     }
@@ -236,7 +349,17 @@ struct ColorBalanceBarView: View {
             get: { stage[keyPath: keyPath] },
             set: { newValue in
                 stage[keyPath: keyPath] = newValue
-                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+            }
+        )
+    }
+
+    private func assetBoolBind(_ keyPath: ReferenceWritableKeyPath<PhotoAsset, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { asset[keyPath: keyPath] },
+            set: { newValue in
+                asset[keyPath: keyPath] = newValue
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
     }
@@ -265,7 +388,7 @@ struct ColorBalanceBarView: View {
             // depending on how wide "Color Zones" happens to render.
             ZStack {
                 HStack(spacing: 8) {
-                    sectionTitle("Color Zones", enabled: stageBoolBind(\.editColorZonesEnabled))
+                    sectionTitle("Color Zones", enabled: stageBoolBind(\.editColorZonesEnabled), font: .caption.weight(.semibold))
                         .fixedSize()
                     Spacer(minLength: 0)
                 }
@@ -274,7 +397,7 @@ struct ColorBalanceBarView: View {
                     Spacer(minLength: 0)
                     resetButton(disabled: !colorZonesHasEdits(stage), action: {
                         resetColorZones(stage)
-                        scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                        scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                     })
                     StoplightToggle(isOn: stageBoolBind(\.editColorZonesEnabled))
                 }
@@ -298,7 +421,7 @@ struct ColorBalanceBarView: View {
                 onPointsChange: { newPoints in
                     let keyPath = colorZonesActiveKeyPath
                     stage[keyPath: keyPath] = newPoints.flatMap { [$0.x, $0.y] }
-                    scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                    scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                 }
             )
             .equatable()
@@ -352,6 +475,93 @@ struct ColorBalanceBarView: View {
         case 0: return \.editColorZonesLightnessPoints
         case 1: return \.editColorZonesChromaPoints
         default: return \.editColorZonesHuePoints
+        }
+    }
+
+    /// A LUT picker (`LUT3DPresetMenu`) + intensity slider, sibling to `colorBalanceSection`/
+    /// `colorZonesSection` — "film simulation" is a color-grading tool same as those two, just one
+    /// that composites last (see `StageParameters.lut3D`'s doc comment).
+    ///
+    /// Deliberately *not* built on the shared `section(...)` helper the sidebar uses: that bundles
+    /// the title/reset/toggle header row and the content into one `VStack` with no seam to hook a
+    /// `.contentTop` guide into partway down, so wrapping the whole thing pinned `.contentTop` to
+    /// the *title's* own top — one entire header-row's height above where `colorZonesSection`'s
+    /// guide actually sits (on its content, below its own toolbar row) — which visibly shoved this
+    /// whole section down, reading as nested under `colorZonesSection` instead of a sibling next to
+    /// it. Matching `colorZonesSection`'s own structure instead — a fixed-height header row (reusing
+    /// its exact `colorZonesToolbarHeight`, so both sections' headers line up pixel-for-pixel), then
+    /// content with the guide on it — fixes that: `.contentTop` now points at the LUT picker itself,
+    /// same as `colorZonesSection`'s points at its graph.
+    private var lut3DSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                sectionTitle(
+                    "Film Simulation", enabled: stage.lut3DData != nil ? stageBoolBind(\.editLUT3DEnabled) : nil,
+                    font: .caption.weight(.semibold)
+                )
+                resetButton(disabled: !lut3DHasEdits(stage), action: {
+                    resetLUT3D(stage)
+                    scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                })
+                if stage.lut3DData != nil {
+                    Spacer(minLength: 0)
+                    StoplightToggle(isOn: stageBoolBind(\.editLUT3DEnabled))
+                }
+            }
+            .frame(height: colorZonesToolbarHeight)
+
+            VStack(alignment: .leading, spacing: 8) {
+                LUT3DPresetMenu(
+                    currentTitle: stage.lut3DTitle,
+                    onSelect: { preset in applyLUT3DPreset(preset) },
+                    onImport: { url in importLUT3DPreset(from: url) }
+                )
+                if stage.lut3DData != nil {
+                    slider(
+                        "Intensity", value: stageBind(\.lut3DIntensity, fallback: 1),
+                        range: 0...1, resetValue: 1
+                    )
+                }
+            }
+            .alignmentGuide(.contentTop) { d in d[.top] }
+        }
+        .frame(width: 180)
+        .alert(
+            "Couldn't Load LUT",
+            isPresented: Binding(get: { lut3DImportError != nil }, set: { if !$0 { lut3DImportError = nil } })
+        ) {
+            Button("OK", role: .cancel) { lut3DImportError = nil }
+        } message: {
+            Text(lut3DImportError ?? "")
+        }
+    }
+
+    /// Applies a library preset to `stage` — copies its data/size/name into the stage's own
+    /// fields (see `LUT3DPreset`'s doc comment for why this is a copy, not a relationship).
+    private func applyLUT3DPreset(_ preset: LUT3DPreset) {
+        stage.lut3DData = preset.data
+        stage.lut3DSize = preset.size
+        stage.lut3DTitle = preset.name
+        stage.editLUT3DEnabled = true
+        scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+    }
+
+    /// Parses `url` as a `.cube` file, adds it to the shared library so it shows up in
+    /// `LUT3DPresetMenu` for every stage from now on, and applies it to `stage` immediately. `url`
+    /// comes from `.fileImporter`, which hands back a security-scoped URL — must bracket the read
+    /// with start/stopAccessingSecurityScopedResource or `LUT3DLoader.load` fails to read the
+    /// file's contents.
+    private func importLUT3DPreset(from url: URL) {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let lut = try LUT3DLoader.load(contentsOf: url)
+            let name = (lut.title?.isEmpty == false ? lut.title : nil) ?? url.deletingPathExtension().lastPathComponent
+            let preset = LUT3DPreset(name: name, size: lut.size, data: lut.data)
+            modelContext.insert(preset)
+            applyLUT3DPreset(preset)
+        } catch {
+            lut3DImportError = "\(error)"
         }
     }
 }

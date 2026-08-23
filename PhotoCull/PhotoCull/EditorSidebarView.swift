@@ -2,14 +2,15 @@ import SwiftUI
 import PhotoCatalog
 import RawEngine
 
-/// Exposure, Detail, Color Balance RGB's Contrast slider, Filmic RGB, and RGB Curve controls — a
-/// genuine separate `View` type (not a computed property on `EditorView`) so dragging any one of
-/// these sliders only re-diffs this cluster, not the color wheels, Temp/Tint/Chroma/Vibrance/
-/// Saturation faders, or Color Zones curve living in `ColorBalanceBarView`. See
+/// Exposure, Color Balance RGB's Contrast slider, Filmic RGB, and RGB Curve controls — a genuine
+/// separate `View` type (not a computed property on `EditorView`) so dragging any one of these
+/// sliders only re-diffs this cluster, not the color wheels, Temp/Tint/Chroma/Vibrance/Saturation/
+/// Sharp/Dehaze faders, or Color Zones curve living in `ColorBalanceBarView`. See
 /// `EditorRenderCoordinator`'s doc comment for why that split matters. White Balance, the Color
-/// Balance wheels, Chroma, Vibrance, and Filmic's Saturation all live in `ColorBalanceBarView`
-/// instead, as vertical faders next to the wheels — the sidebar/bar split was never a strict
-/// module boundary; Contrast is the one Color Balance RGB field that stayed here.
+/// Balance wheels, Chroma, Vibrance, Filmic's Saturation, Sharpness, and Dehaze all live in
+/// `ColorBalanceBarView` instead, as vertical faders next to the wheels — the sidebar/bar split
+/// was never a strict module boundary; Contrast is the one Color Balance RGB field that stayed
+/// here.
 struct EditorSidebarView: View {
     let asset: PhotoAsset
     /// The stage currently selected in `StagesSidebarView` — the four kernel-module controls
@@ -21,6 +22,7 @@ struct EditorSidebarView: View {
     /// `EditorView.activeStages`'s doc comment for why this isn't recomputed here.
     let activeStages: [Stage]
     let coordinator: EditorRenderCoordinator
+    let history: EditHistory
 
     /// Purely local UI state, not persisted: reopening the editor always starts collapsed, since
     /// "most of the time I leave it at default" was the whole reason for hiding it.
@@ -57,33 +59,28 @@ struct EditorSidebarView: View {
                 // backdrops (`CurveEditorControl`'s) are captioned nowhere at all since they sit
                 // behind a graph that's already self-explanatory; these need the label since nothing
                 // else on screen explains what they're showing.
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("RGB")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    RGBHistogramView(data: coordinator.rgbHistogram)
-                }
-                VStack(spacing: 8) {
-                    Text("Color")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    ColorDensityWheel(density: coordinator.colorDensity, diameter: min(200, width * 0.42))
-                        .frame(maxWidth: .infinity)
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Histogram")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        RGBHistogramView(data: coordinator.rgbHistogram, height: 160)
+                    }
+                    .frame(maxWidth: .infinity)
+                    VStack(spacing: 8) {
+                        Text("Color Graph")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ColorDensityWheel(density: coordinator.colorDensity, diameter: min(160, width * 0.34))
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
                 }
                 section("Exposure") {
                     slider(
                         "Exposure", value: bind(\.editExposure, fallback: coordinator.renderer.defaultExposure),
                         range: -4...4, resetValue: coordinator.renderer.defaultExposure
                     )
-                }
-                if coordinator.isReady && coordinator.renderer.isSharpnessSupported {
-                    section("Detail") {
-                        slider(
-                            "Sharpness", value: bind(\.editSharpnessAmount, fallback: coordinator.renderer.defaultSharpnessAmount),
-                            range: 0...1, resetValue: coordinator.renderer.defaultSharpnessAmount
-                        )
-                    }
                 }
                 // Just Contrast — Chroma/Vibrance moved to `ColorBalanceBarView`'s
                 // `colorBalanceSection` as vertical faders next to the wheels, alongside
@@ -97,7 +94,7 @@ struct EditorSidebarView: View {
                         sectionTitle("Filmic RGB", enabled: stageBoolBind(\.editFilmicEnabled))
                         resetButton(disabled: !filmicHasEdits(stage), action: {
                             resetFilmic(stage)
-                            scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                            scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                         })
                         Spacer()
                         Button {
@@ -134,25 +131,53 @@ struct EditorSidebarView: View {
                         )
                     }
                 }
-                section("RGB Curve", resetDisabled: !rgbCurveHasEdits(stage), onReset: {
-                    resetRGBCurve(stage)
-                    scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
-                }, enabled: stageBoolBind(\.editRGBCurveEnabled)) {
+                VStack(alignment: .leading, spacing: 10) {
+                    // Three independent regions, same technique as `ColorBalanceBarView.colorZonesSection`'s
+                    // own header — "Curve" + reset pinned leading, "Preserve Color" truly centered on the
+                    // row's full width, the module enabled toggle pinned trailing. A single `HStack` with
+                    // `Spacer()`s in between would center "Preserve Color" in whatever's left between the
+                    // other two instead of on the row as a whole, drifting depending on how wide "Curve"'s
+                    // own leading cluster happens to render.
+                    ZStack {
+                        HStack(spacing: 4) {
+                            sectionTitle("Curve", enabled: stageBoolBind(\.editRGBCurveEnabled))
+                            resetButton(disabled: !rgbCurveHasEdits(stage), action: {
+                                resetRGBCurve(stage)
+                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                            })
+                            Spacer(minLength: 0)
+                        }
+                        HStack(spacing: 6) {
+                            Text("Preserve Color")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            StoplightToggle(isOn: Binding(
+                                get: { stage.editRGBCurvePreserveColors ?? true },
+                                set: { stage.editRGBCurvePreserveColors = $0; scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history) }
+                            ))
+                        }
+                        HStack(spacing: 4) {
+                            Spacer(minLength: 0)
+                            StoplightToggle(isOn: stageBoolBind(\.editRGBCurveEnabled))
+                        }
+                    }
+                    // No inner title/hint/reset row anymore (`showHeader: false`) — "Curve" above already
+                    // carries the title and the one reset button that actually matters (this module's full
+                    // reset, via `resetRGBCurve`); `CurveEditorControl`'s own built-in header only ever reset
+                    // the curve's points, a narrower, redundant second reset button sitting right below the
+                    // real one.
                     CurveEditorHost(
                         points: rgbCurvePoints(for: stage), height: rgbCurveHeight(for: width),
                         histogram: coordinator.luminanceHistogram,
+                        showHeader: false,
                         onPointsChange: { newPoints in
                             stage.editRGBCurvePoints = newPoints.flatMap { [$0.x, $0.y] }
-                            scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                            scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                         }
                     )
                     .equatable()
-                    Toggle("Preserve Color", isOn: Binding(
-                        get: { stage.editRGBCurvePreserveColors ?? true },
-                        set: { stage.editRGBCurvePreserveColors = $0; scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator) }
-                    ))
                 }
-                EditorFooterActions(asset: asset, stage: stage, activeStages: activeStages, coordinator: coordinator)
+                EditorFooterActions(asset: asset, stage: stage, activeStages: activeStages, coordinator: coordinator, history: history)
             }
             .padding()
         }
@@ -166,7 +191,7 @@ struct EditorSidebarView: View {
             get: { asset[keyPath: keyPath] ?? fallback },
             set: { newValue in
                 asset[keyPath: keyPath] = newValue
-                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
     }
@@ -176,7 +201,7 @@ struct EditorSidebarView: View {
             get: { stage[keyPath: keyPath] ?? fallback },
             set: { newValue in
                 stage[keyPath: keyPath] = newValue
-                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
     }
@@ -186,7 +211,7 @@ struct EditorSidebarView: View {
             get: { stage[keyPath: keyPath] },
             set: { newValue in
                 stage[keyPath: keyPath] = newValue
-                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
     }

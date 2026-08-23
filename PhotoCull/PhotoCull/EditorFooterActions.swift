@@ -17,14 +17,23 @@ struct EditorFooterActions: View {
     /// `EditorView.activeStages`'s doc comment for why this isn't recomputed here.
     let activeStages: [Stage]
     let coordinator: EditorRenderCoordinator
+    let history: EditHistory
 
     @State private var exportStatus: String?
 
     var body: some View {
         section(nil) {
+            HStack(spacing: 8) {
+                Button("Undo") { history.undo() }
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(!history.canUndo)
+                Button("Redo") { history.redo() }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(!history.canRedo)
+            }
             Button("Reset All") {
                 resetAllEdits(asset: asset, stage: stage)
-                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
             .disabled(!hasAnyEdits(asset: asset, stage: stage))
             Button("Export…") { exportImage() }
@@ -51,7 +60,7 @@ struct EditorFooterActions: View {
             try ExportPipeline.export(
                 renderer: coordinator.renderer,
                 baseParams: rawBaseParameters(for: asset),
-                stageStack: activeStages.map(stageParameters(for:)),
+                stageStack: activeStages.map { stageParameters(for: $0, detailEnabled: asset.editDetailEnabled) },
                 format: format,
                 to: url
             )

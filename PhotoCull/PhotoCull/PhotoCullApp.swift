@@ -5,7 +5,9 @@ import PhotoCatalog
 @main
 struct PhotoCullApp: App {
     let sharedModelContainer: ModelContainer = {
-        let schema = Schema([PhotoAsset.self, PhotoStack.self, PhotoScene.self, Session.self, Stage.self])
+        let schema = Schema([
+            PhotoAsset.self, PhotoStack.self, PhotoScene.self, Session.self, Stage.self, LUT3DPreset.self, AssetVersion.self
+        ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
             return try ModelContainer(for: schema, configurations: [config])
@@ -20,5 +22,9 @@ struct PhotoCullApp: App {
         }
         .modelContainer(sharedModelContainer)
         .windowStyle(.hiddenTitleBar)
+
+        Settings {
+            SettingsView()
+        }
     }
 }

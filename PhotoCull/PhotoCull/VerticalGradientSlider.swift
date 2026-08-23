@@ -29,8 +29,19 @@ struct VerticalGradientSlider: View {
             let thumbY = (1 - fraction(for: value)) * height
 
             ZStack(alignment: .top) {
-                LinearGradient(gradient: gradient, startPoint: .bottom, endPoint: .top)
-                    .clipShape(RoundedRectangle(cornerRadius: trackWidth / 2))
+                // A hairline border on the track itself — without it, a gradient whose end color
+                // sits close to `Color.sidebarBackground` (e.g. `detailIntensity`'s dark-gray
+                // bottom stop) visually blends into the background near that end, reading as a
+                // shorter track than a vivid-end gradient's (e.g. `colorIntensity`'s reds/blues)
+                // even though both render at the exact same `frame(height:)`. The border keeps
+                // every fader's full top/bottom extent equally legible regardless of which
+                // gradient it uses.
+                RoundedRectangle(cornerRadius: trackWidth / 2)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    .background(
+                        LinearGradient(gradient: gradient, startPoint: .bottom, endPoint: .top)
+                            .clipShape(RoundedRectangle(cornerRadius: trackWidth / 2))
+                    )
 
                 RoundedRectangle(cornerRadius: thumbHeight / 2)
                     .fill(Color.white)

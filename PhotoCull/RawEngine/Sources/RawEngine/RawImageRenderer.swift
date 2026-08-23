@@ -1,4 +1,5 @@
 import CoreImage
+import CoreImage.CIFilterBuiltins
 import CoreGraphics
 import Foundation
 
@@ -54,12 +55,15 @@ public final class RawImageRenderer {
         }
     }
 
-    /// Runs one stage's four kernel passes (Filmic → ColorBalance → ColorZones → RGBCurve, each
-    /// skipped when `nil`) on top of `image`. Called once per active stage, in stack order, with
-    /// each call's result feeding the next — a real sequential composite, not a merged parameter
-    /// set (see `StageParameters`'s doc comment for why).
+    /// Runs one stage's six kernel passes (Dehaze → Filmic → ColorBalance → ColorZones →
+    /// RGBCurve → LUT3D, each skipped when `nil`) on top of `image`. Called once per active
+    /// stage, in stack order, with each call's result feeding the next — a real sequential
+    /// composite, not a merged parameter set (see `StageParameters`'s doc comment for why).
     private func applyStage(_ params: StageParameters, to image: CIImage) -> CIImage {
         var output = image
+        if let dehaze = params.dehaze {
+            output = DehazeKernel.apply(to: output, params: dehaze)
+        }
         if let filmicRGB = params.filmicRGB {
             output = FilmicRGBKernel.apply(to: output, params: filmicRGB)
         }
@@ -72,7 +76,35 @@ public final class RawImageRenderer {
         if let rgbCurve = params.rgbCurve {
             output = RGBCurveKernel.apply(to: output, params: rgbCurve)
         }
+        if let lut3D = params.lut3D {
+            output = LUT3DFilter.apply(to: output, params: lut3D)
+        }
+        if let maskData = params.maskData, let masked = applyMask(maskData, blending: output, over: image) {
+            output = masked
+        }
         return output
+    }
+
+    /// Decodes a stage's grayscale mask PNG, rescales it to `image`'s extent, and blends `output`
+    /// over `image` through it. `CIBlendWithMask` reads a mask image's *grayscale value* directly
+    /// (unlike `CIBlendWithAlphaMask`, which reads alpha instead) — the plain decoded grayscale
+    /// mask is exactly what it wants, no alpha conversion needed.
+    private func applyMask(_ maskData: Data, blending output: CIImage, over image: CIImage) -> CIImage? {
+        guard let maskImage = CIImage(data: maskData) else { return nil }
+        let maskExtent = maskImage.extent
+        guard maskExtent.width > 0, maskExtent.height > 0 else { return nil }
+        let scale = CGAffineTransform(
+            scaleX: image.extent.width / maskExtent.width,
+            y: image.extent.height / maskExtent.height
+        )
+        let scaledMask = maskImage.transformed(by: scale)
+            .transformed(by: CGAffineTransform(translationX: image.extent.origin.x, y: image.extent.origin.y))
+
+        let blend = CIFilter.blendWithMask()
+        blend.inputImage = output
+        blend.backgroundImage = image
+        blend.maskImage = scaledMask
+        return blend.outputImage?.cropped(to: image.extent)
     }
 
     /// Renders a preview downscaled to fit within `maxPixelSize` on its longest side.
