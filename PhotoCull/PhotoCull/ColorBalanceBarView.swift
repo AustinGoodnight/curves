@@ -490,8 +490,21 @@ struct ColorBalanceBarView: View {
     /// whole section down, reading as nested under `colorZonesSection` instead of a sibling next to
     /// it. Matching `colorZonesSection`'s own structure instead — a fixed-height header row (reusing
     /// its exact `colorZonesToolbarHeight`, so both sections' headers line up pixel-for-pixel), then
-    /// content with the guide on it — fixes that: `.contentTop` now points at the LUT picker itself,
-    /// same as `colorZonesSection`'s points at its graph.
+    /// content with the guide on it — fixes that.
+    ///
+    /// `.contentTop`'s offset is `perControlTitleHeight`, not `0` — every *other* column in this bar
+    /// (Temp/Tint, Global/Shadows/Midtones/Highlights, Chr/Vib/Sat, Sharp/Dehaze) has its own small
+    /// `.caption` mini-title sitting above the actual control, which is exactly what
+    /// `perControlTitleHeight` skips past to land the guide on the control itself. `LUT3DPresetMenu`
+    /// used to be the one column with no such mini-title — its own label ("Choose LUT…") *is* the
+    /// control, with no caption above it — so this used to guide on `d[.top]` (0) instead, on the
+    /// theory that with nothing to skip, 0 was the right offset. It wasn't: `LUT3DPresetMenu`'s
+    /// `Menu`-based label still carries its own internal top inset (padding plus the control's own
+    /// native menu chrome, `.menuStyle(.borderlessButton)` notwithstanding) that a bare `Text` never
+    /// has, so its *visible* content still sat measurably below Sharp/Dehaze's, Temp/Tint's, etc. —
+    /// this column just didn't have a mini-title tall enough to absorb it. Adding one (`"LUT"`,
+    /// below) both fixes the leftover gap and brings this column in line with every other column's
+    /// own visual structure instead of being the sole exception.
     private var lut3DSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
@@ -511,6 +524,9 @@ struct ColorBalanceBarView: View {
             .frame(height: colorZonesToolbarHeight)
 
             VStack(alignment: .leading, spacing: 8) {
+                Text("LUT")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 LUT3DPresetMenu(
                     currentTitle: stage.lut3DTitle,
                     onSelect: { preset in applyLUT3DPreset(preset) },
@@ -523,7 +539,7 @@ struct ColorBalanceBarView: View {
                     )
                 }
             }
-            .alignmentGuide(.contentTop) { d in d[.top] }
+            .alignmentGuide(.contentTop) { d in d[.top] + perControlTitleHeight }
         }
         .frame(width: 180)
         .alert(

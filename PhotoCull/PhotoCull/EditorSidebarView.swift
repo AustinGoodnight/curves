@@ -76,17 +76,18 @@ struct EditorSidebarView: View {
                     }
                     .fixedSize(horizontal: true, vertical: false)
                 }
+                // Exposure (native `CIRAWFilter` input, asset-level) and Contrast (a Color
+                // Balance RGB field, per-stage) share one section despite coming from different
+                // params — both are basic tone controls, and grouping them saves a second header
+                // for what would otherwise be a single-slider section. Chroma/Vibrance, Color
+                // Balance RGB's other two "plain slider" fields, stayed in `ColorBalanceBarView`'s
+                // `colorBalanceSection` instead (vertical faders next to the wheels) since those
+                // read as color controls, not tone.
                 section("Exposure") {
                     slider(
                         "Exposure", value: bind(\.editExposure, fallback: coordinator.renderer.defaultExposure),
                         range: -4...4, resetValue: coordinator.renderer.defaultExposure
                     )
-                }
-                // Just Contrast — Chroma/Vibrance moved to `ColorBalanceBarView`'s
-                // `colorBalanceSection` as vertical faders next to the wheels, alongside
-                // Saturation from Filmic RGB below. Contrast stays here since it wasn't part of
-                // that move.
-                section("Color Balance RGB") {
                     slider("Contrast", value: stageBind(\.editColorBalanceContrast, fallback: 0), range: -0.5...0.5)
                 }
                 VStack(alignment: .leading, spacing: 10) {

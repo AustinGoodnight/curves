@@ -6,7 +6,8 @@ import PhotoCatalog
 struct PhotoCullApp: App {
     let sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            PhotoAsset.self, PhotoStack.self, PhotoScene.self, Session.self, Stage.self, LUT3DPreset.self, AssetVersion.self
+            PhotoAsset.self, PhotoStack.self, PhotoScene.self, Session.self, Stage.self, LUT3DPreset.self, AssetVersion.self,
+            Preset.self
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {

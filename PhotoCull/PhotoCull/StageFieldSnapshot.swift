@@ -144,6 +144,69 @@ struct StageFieldSnapshot: Codable, Equatable {
 }
 
 extension StageFieldSnapshot {
+    /// Approximates "the combined look of every active stage" as a single flat snapshot, for the
+    /// "Save All Stages as Preset" action (`StagesSidebarView.savePreset()`). This is **not** a
+    /// mathematically exact flatten of the composited kernel stack — that's not generally possible,
+    /// since curves/zones/LUTs don't compose by simple field overwrite — it's a practical
+    /// approximation: walk `stages` in their actual composite order (scene, then single, then
+    /// customs by `sortIndex` — see `activeStageStack(for:)`) and, per field, let the topmost stage
+    /// that actually set a value win. The per-module "Enabled" bypass flags are ANDed instead of
+    /// overridden, so a module any stage in the stack explicitly turned off stays off in the merged
+    /// preset, rather than a later, untouched stage's default `true` silently reviving it.
+    /// `maskData` is dropped entirely — masks are spatial and stage-specific, so carrying one over
+    /// from an arbitrary stage in the merge would misapply it; a merged preset always covers the
+    /// whole image. `stages` must be non-empty (callers gate the triggering button on that).
+    init(mergingActiveStages stages: [Stage]) {
+        precondition(!stages.isEmpty, "mergingActiveStages requires at least one stage")
+        var result = StageFieldSnapshot(capturing: stages[0])
+        for stage in stages.dropFirst() {
+            let next = StageFieldSnapshot(capturing: stage)
+            result.editDehazeAmount = next.editDehazeAmount ?? result.editDehazeAmount
+
+            result.editFilmicEnabled = result.editFilmicEnabled && next.editFilmicEnabled
+            result.editFilmicWhitePointSource = next.editFilmicWhitePointSource ?? result.editFilmicWhitePointSource
+            result.editFilmicBlackPointSource = next.editFilmicBlackPointSource ?? result.editFilmicBlackPointSource
+            result.editFilmicContrast = next.editFilmicContrast ?? result.editFilmicContrast
+            result.editFilmicLatitude = next.editFilmicLatitude ?? result.editFilmicLatitude
+            result.editFilmicSaturation = next.editFilmicSaturation ?? result.editFilmicSaturation
+            result.editFilmicBalance = next.editFilmicBalance ?? result.editFilmicBalance
+
+            result.editColorBalanceEnabled = result.editColorBalanceEnabled && next.editColorBalanceEnabled
+            result.editColorBalanceGlobalY = next.editColorBalanceGlobalY ?? result.editColorBalanceGlobalY
+            result.editColorBalanceGlobalC = next.editColorBalanceGlobalC ?? result.editColorBalanceGlobalC
+            result.editColorBalanceGlobalH = next.editColorBalanceGlobalH ?? result.editColorBalanceGlobalH
+            result.editColorBalanceShadowsY = next.editColorBalanceShadowsY ?? result.editColorBalanceShadowsY
+            result.editColorBalanceShadowsC = next.editColorBalanceShadowsC ?? result.editColorBalanceShadowsC
+            result.editColorBalanceShadowsH = next.editColorBalanceShadowsH ?? result.editColorBalanceShadowsH
+            result.editColorBalanceMidtonesY = next.editColorBalanceMidtonesY ?? result.editColorBalanceMidtonesY
+            result.editColorBalanceMidtonesC = next.editColorBalanceMidtonesC ?? result.editColorBalanceMidtonesC
+            result.editColorBalanceMidtonesH = next.editColorBalanceMidtonesH ?? result.editColorBalanceMidtonesH
+            result.editColorBalanceHighlightsY = next.editColorBalanceHighlightsY ?? result.editColorBalanceHighlightsY
+            result.editColorBalanceHighlightsC = next.editColorBalanceHighlightsC ?? result.editColorBalanceHighlightsC
+            result.editColorBalanceHighlightsH = next.editColorBalanceHighlightsH ?? result.editColorBalanceHighlightsH
+            result.editColorBalanceContrast = next.editColorBalanceContrast ?? result.editColorBalanceContrast
+            result.editColorBalanceVibrance = next.editColorBalanceVibrance ?? result.editColorBalanceVibrance
+            result.editColorBalanceChromaGlobal = next.editColorBalanceChromaGlobal ?? result.editColorBalanceChromaGlobal
+
+            result.editRGBCurveEnabled = result.editRGBCurveEnabled && next.editRGBCurveEnabled
+            result.editRGBCurvePoints = next.editRGBCurvePoints ?? result.editRGBCurvePoints
+            result.editRGBCurvePreserveColors = next.editRGBCurvePreserveColors ?? result.editRGBCurvePreserveColors
+
+            result.editColorZonesEnabled = result.editColorZonesEnabled && next.editColorZonesEnabled
+            result.editColorZonesLightnessPoints = next.editColorZonesLightnessPoints ?? result.editColorZonesLightnessPoints
+            result.editColorZonesChromaPoints = next.editColorZonesChromaPoints ?? result.editColorZonesChromaPoints
+            result.editColorZonesHuePoints = next.editColorZonesHuePoints ?? result.editColorZonesHuePoints
+
+            result.editLUT3DEnabled = result.editLUT3DEnabled && next.editLUT3DEnabled
+            result.lut3DData = next.lut3DData ?? result.lut3DData
+            result.lut3DSize = next.lut3DSize ?? result.lut3DSize
+            result.lut3DTitle = next.lut3DTitle ?? result.lut3DTitle
+            result.lut3DIntensity = next.lut3DIntensity ?? result.lut3DIntensity
+        }
+        result.maskData = nil
+        self = result
+    }
+
     /// Which modules differ between `self` and `other` — used only for `EditHistory`'s
     /// human-readable history-list labels (`EditSnapshot.changeLabel(from:to:)`), never to decide
     /// what to restore.

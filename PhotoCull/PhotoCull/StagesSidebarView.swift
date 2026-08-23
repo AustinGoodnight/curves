@@ -36,6 +36,16 @@ struct StagesSidebarView: View {
     @State private var renamingStage: Stage?
     @State private var renameText = ""
 
+    /// What "Save Preset…" is about to capture — a single stage (right-click on a row) or the
+    /// whole active stack flattened into one (the bottom "Save All Stages as Preset…" button). Both
+    /// funnel through the same name-prompt alert and `savePreset()`.
+    private enum PresetSaveSource {
+        case stage(Stage)
+        case allActiveStages
+    }
+    @State private var presetSaveSource: PresetSaveSource?
+    @State private var newPresetName = ""
+
     @State private var isSavingVersion = false
     @State private var newVersionName = ""
     @State private var renamingVersion: AssetVersion?
@@ -84,13 +94,6 @@ struct StagesSidebarView: View {
                 row(for: asset.singleStage, title: "Single")
                 ForEach(asset.customStages) { stage in
                     row(for: stage, title: stage.name)
-                        .contextMenu {
-                            if stage.kind == .assistedMask {
-                                Button("Refine Mask…") { onEditMask(stage) }
-                            }
-                            Button("Rename…") { beginRename(stage) }
-                            Button("Delete", role: .destructive) { delete(stage) }
-                        }
                 }
             }
             Button {
@@ -107,6 +110,15 @@ struct StagesSidebarView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
+            Button {
+                presetSaveSource = .allActiveStages
+                newPresetName = "Preset"
+            } label: {
+                Label("Save All Stages as Preset…", systemImage: "square.stack.3d.up")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .disabled(activeStages.isEmpty)
             Section("Info") {
                 VStack(alignment: .leading, spacing: 6) {
                     if !asset.cameraModel.isEmpty {
@@ -180,6 +192,9 @@ struct StagesSidebarView: View {
                     }
                 }
             }
+            Section("Presets") {
+                PresetBrowserView(onApply: applyPreset)
+            }
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
@@ -194,6 +209,14 @@ struct StagesSidebarView: View {
                 let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty { renamingStage?.name = trimmed }
             }
+        }
+        .alert("Save Preset", isPresented: Binding(
+            get: { presetSaveSource != nil },
+            set: { if !$0 { presetSaveSource = nil } }
+        )) {
+            TextField("Preset Name", text: $newPresetName)
+            Button("Cancel", role: .cancel) { presetSaveSource = nil }
+            Button("Save") { savePreset() }
         }
         .alert("Save Version", isPresented: $isSavingVersion) {
             TextField("Version Name", text: $newVersionName)
@@ -272,6 +295,17 @@ struct StagesSidebarView: View {
             .controlSize(.mini)
         }
         .listRowBackground(selectedStage.id == stage.id ? Color.accentColor.opacity(0.2) : Color.clear)
+        .contextMenu {
+            if stage.kind == .assistedMask {
+                Button("Refine Mask…") { onEditMask(stage) }
+            }
+            Button("Save as Preset…") { beginSavePreset(stage) }
+            // Scene/Single are structural (see `Stage`'s doc comment) — never renamed or deleted.
+            if stage.kind == .custom || stage.kind == .assistedMask {
+                Button("Rename…") { beginRename(stage) }
+                Button("Delete", role: .destructive) { delete(stage) }
+            }
+        }
     }
 
     /// Encodes the asset's current base params + Single stage into a new `AssetVersion`, parented
@@ -369,6 +403,49 @@ struct StagesSidebarView: View {
     private func beginRename(_ stage: Stage) {
         renamingStage = stage
         renameText = stage.name
+    }
+
+    private func beginSavePreset(_ stage: Stage) {
+        presetSaveSource = .stage(stage)
+        newPresetName = stage.name
+    }
+
+    /// Encodes whatever `presetSaveSource` pointed at (one stage's own values, or the whole active
+    /// stack flattened — see `StageFieldSnapshot.init(mergingActiveStages:)`) into a new `Preset`.
+    /// Silently does nothing on an empty name or an encoding failure (every snapshot field is a
+    /// plain Double?/Bool/Data?/[Double]?/String?, so encoding can't actually fail in practice).
+    private func savePreset() {
+        guard let source = presetSaveSource else { return }
+        presetSaveSource = nil
+        let trimmed = newPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let snapshot: StageFieldSnapshot
+        switch source {
+        case .stage(let stage):
+            snapshot = StageFieldSnapshot(capturing: stage)
+        case .allActiveStages:
+            snapshot = StageFieldSnapshot(mergingActiveStages: activeStages)
+        }
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        modelContext.insert(Preset(name: trimmed, snapshotData: data))
+    }
+
+    /// Loads a saved preset onto this photo as a new **custom stage** — never a scene; see
+    /// `Preset`'s doc comment. Same blank-slate/stack-ownership rules as `addCustomStage()`, just
+    /// pre-populated from the preset's snapshot instead of starting empty.
+    private func applyPreset(_ preset: Preset) {
+        guard let snapshot = try? JSONDecoder().decode(StageFieldSnapshot.self, from: preset.snapshotData) else { return }
+        let nextIndex = (asset.customStages.map(\.sortIndex).max() ?? -1) + 1
+        let stage: Stage
+        if let stack = asset.stack {
+            stage = Stage(kind: .custom, name: preset.name, stack: stack, sortIndex: nextIndex)
+        } else {
+            stage = Stage(kind: .custom, name: preset.name, asset: asset, sortIndex: nextIndex)
+        }
+        snapshot.apply(to: stage)
+        modelContext.insert(stage)
+        selectedStage = stage
+        refreshAndRender()
     }
 
     private func delete(_ stage: Stage) {
