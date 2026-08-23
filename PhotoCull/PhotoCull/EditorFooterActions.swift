@@ -41,23 +41,14 @@ struct EditorFooterActions: View {
         }
     }
 
-    /// Full-width, filled-box styling matching the Filmic module button in `EditorSidebarView` —
-    /// these two footer actions get the same visual weight as a primary module toggle instead of a
-    /// plain default-styled button.
+    /// `FilledActionButtonStyle` — matching the Filmic module button in `EditorSidebarView` — gives
+    /// these two footer actions the same visual weight as a primary module toggle instead of a
+    /// plain default-styled button. See that style's doc comment for the other call site
+    /// (`ExportBarView`).
     private func wideActionButton(_ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(enabled ? Color.accentColor : Color.secondary)
-        .background(
-            enabled ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.06),
-            in: RoundedRectangle(cornerRadius: 8)
-        )
-        .disabled(!enabled)
+        Button(title, action: action)
+            .buttonStyle(FilledActionButtonStyle(isEnabled: enabled))
+            .disabled(!enabled)
     }
 
     private func exportImage() {

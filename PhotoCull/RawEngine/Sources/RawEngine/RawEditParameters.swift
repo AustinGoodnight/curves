@@ -16,6 +16,10 @@ public struct RawBaseParameters: Equatable, Sendable {
     /// for the same reason as every other field on this struct — see `LensCorrectionParameters`'s
     /// doc comment.
     public var lensCorrection: LensCorrectionParameters?
+    /// `nil` means "no straighten/crop" (full, unrotated frame). Unlike every other field on this
+    /// struct, `RawImageRenderer` applies this dead last, after the stage stack — see
+    /// `CropParameters`'s doc comment for why.
+    public var crop: CropParameters?
 
     public init(
         exposure: Double? = nil,
@@ -23,7 +27,8 @@ public struct RawBaseParameters: Equatable, Sendable {
         neutralTemperature: Double? = nil,
         neutralTint: Double? = nil,
         sharpnessAmount: Double? = nil,
-        lensCorrection: LensCorrectionParameters? = nil
+        lensCorrection: LensCorrectionParameters? = nil,
+        crop: CropParameters? = nil
     ) {
         self.exposure = exposure
         self.boostAmount = boostAmount
@@ -31,6 +36,7 @@ public struct RawBaseParameters: Equatable, Sendable {
         self.neutralTint = neutralTint
         self.sharpnessAmount = sharpnessAmount
         self.lensCorrection = lensCorrection
+        self.crop = crop
     }
 
     public static let none = RawBaseParameters()

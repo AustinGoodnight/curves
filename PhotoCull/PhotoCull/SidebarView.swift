@@ -16,24 +16,9 @@ struct SidebarView: View, Equatable {
 
     var body: some View {
         List {
-            Section("Library") {
-                row(
-                    title: "All Photos", systemImage: "photo.on.rectangle",
-                    isSelected: selectedScene == nil && selectedSession == nil
-                ) {
-                    selectedScene = nil
-                    selectedSession = nil
-                }
-            }
             ForEach(sessions) { session in
-                Section(session.name) {
-                    row(
-                        title: "All in Session", systemImage: "calendar",
-                        isSelected: selectedScene == nil && selectedSession?.id == session.id
-                    ) {
-                        selectedScene = nil
-                        selectedSession = session
-                    }
+                let isSessionSelected = selectedScene == nil && selectedSession?.id == session.id
+                Section {
                     ForEach(scenesFor(session)) { scene in
                         row(title: scene.name, systemImage: "rectangle.stack", isSelected: selectedScene?.id == scene.id) {
                             selectedSession = session
@@ -52,6 +37,21 @@ struct SidebarView: View, Equatable {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
+                } header: {
+                    Button {
+                        selectedScene = nil
+                        selectedSession = session
+                    } label: {
+                        Text(session.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 4)
+                    .background(isSessionSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .textCase(nil)
                 }
             }
         }

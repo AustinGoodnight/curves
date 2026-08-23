@@ -86,7 +86,7 @@ struct EditorSidebarView: View {
                         ticks: [-4, -3, -2, -1, 0, 1, 2, 3, 4]
                     )
                     slider(
-                        "Contrast", value: stageBind(\.editColorBalanceContrast, fallback: 0), range: -0.5...0.5,
+                        "Contrast", value: stageBind(\.editColorBalanceContrast, fallback: 0, module: colorBalanceGate), range: -0.5...0.5,
                         ticks: [-0.5, -0.25, 0, 0.25, 0.5]
                     )
                 }
@@ -121,27 +121,27 @@ struct EditorSidebarView: View {
                         let d = FilmicRGBParameters.darktableDefault
                         VStack(alignment: .leading, spacing: 10) {
                             slider(
-                                "White EV", value: stageBind(\.editFilmicWhitePointSource, fallback: d.whitePointSource),
+                                "White EV", value: stageBind(\.editFilmicWhitePointSource, fallback: d.whitePointSource, module: filmicGate),
                                 range: 2...8, resetValue: d.whitePointSource,
                                 ticks: [2, 3, 4, 5, 6, 7, 8]
                             )
                             slider(
-                                "Black EV", value: stageBind(\.editFilmicBlackPointSource, fallback: d.blackPointSource),
+                                "Black EV", value: stageBind(\.editFilmicBlackPointSource, fallback: d.blackPointSource, module: filmicGate),
                                 range: -14 ... -2, resetValue: d.blackPointSource,
                                 ticks: [-14, -12, -10, -8, -6, -4, -2]
                             )
                             slider(
-                                "Contrast", value: stageBind(\.editFilmicContrast, fallback: d.contrast),
+                                "Contrast", value: stageBind(\.editFilmicContrast, fallback: d.contrast, module: filmicGate),
                                 range: 0.5...2, resetValue: d.contrast,
                                 ticks: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
                             )
                             slider(
-                                "Latitude", value: stageBind(\.editFilmicLatitude, fallback: d.latitude),
+                                "Latitude", value: stageBind(\.editFilmicLatitude, fallback: d.latitude, module: filmicGate),
                                 range: 0.01...80, resetValue: d.latitude,
                                 ticks: [0, 20, 40, 60, 80]
                             )
                             slider(
-                                "Balance", value: stageBind(\.editFilmicBalance, fallback: d.balance),
+                                "Balance", value: stageBind(\.editFilmicBalance, fallback: d.balance, module: filmicGate),
                                 range: -50...50, resetValue: d.balance,
                                 ticks: [-50, -25, 0, 25, 50]
                             )
@@ -165,7 +165,7 @@ struct EditorSidebarView: View {
                     ZStack {
                         HStack(spacing: 4) {
                             sectionTitle("Curve", enabled: stageBoolBind(\.editRGBCurveEnabled))
-                            resetButton(disabled: !rgbCurveHasEdits(stage), action: {
+                            resetButton(disabled: !rgbCurveHasAdjustments(stage), action: {
                                 resetRGBCurve(stage)
                                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                             })
@@ -177,7 +177,12 @@ struct EditorSidebarView: View {
                                 .foregroundStyle(.secondary)
                             StoplightToggle(isOn: Binding(
                                 get: { stage.editRGBCurvePreserveColors ?? true },
-                                set: { stage.editRGBCurvePreserveColors = $0; scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history) }
+                                set: { newValue in
+                                    let hadAdjustments = rgbCurveGate.hasAdjustments()
+                                    stage.editRGBCurvePreserveColors = newValue
+                                    syncModuleEnabled(rgbCurveGate, hadAdjustments: hadAdjustments)
+                                    scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                                }
                             ))
                         }
                         HStack(spacing: 4) {
@@ -196,7 +201,9 @@ struct EditorSidebarView: View {
                         showHeader: false,
                         showEndpointControls: true,
                         onPointsChange: { newPoints in
+                            let hadAdjustments = rgbCurveGate.hasAdjustments()
                             stage.editRGBCurvePoints = newPoints.flatMap { [$0.x, $0.y] }
+                            syncModuleEnabled(rgbCurveGate, hadAdjustments: hadAdjustments)
                             scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                         }
                     )
@@ -205,7 +212,7 @@ struct EditorSidebarView: View {
                     // endpoint — small range ("slightly") since this is meant for a fine trim, not
                     // a replacement for Filmic's much wider Black EV control.
                     slider(
-                        "Black Lift Precise", value: stageBind(\.editRGBCurveBlackLift, fallback: 0),
+                        "Black Lift Precise", value: stageBind(\.editRGBCurveBlackLift, fallback: 0, module: rgbCurveGate),
                         range: 0...0.15, resetValue: 0, ticks: [0, 0.05, 0.1, 0.15]
                     )
                 }
@@ -228,14 +235,38 @@ struct EditorSidebarView: View {
         )
     }
 
-    private func stageBind(_ keyPath: ReferenceWritableKeyPath<Stage, Double?>, fallback: Double) -> Binding<Double> {
+    /// `module`, when passed, keeps that module's own bypass switch synced to whether it still has
+    /// adjustments after this particular field's write — see `syncModuleEnabled`'s doc comment.
+    private func stageBind(
+        _ keyPath: ReferenceWritableKeyPath<Stage, Double?>, fallback: Double, module: ModuleGate? = nil
+    ) -> Binding<Double> {
         Binding(
             get: { stage[keyPath: keyPath] ?? fallback },
             set: { newValue in
+                let hadAdjustments = module?.hasAdjustments()
                 stage[keyPath: keyPath] = newValue
+                if let module, let hadAdjustments {
+                    syncModuleEnabled(module, hadAdjustments: hadAdjustments)
+                }
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
+    }
+
+    /// The Color Balance RGB module's own bypass switch has no `StoplightToggle` of its own in the
+    /// UI (see `Stage.editColorBalanceEnabled`'s doc comment) — Contrast is the one field gated
+    /// only by it (no Wheels/Balance sub-group), so this keeps it in sync purely for the render-cost
+    /// savings `syncModuleEnabled` documents, invisibly to the user.
+    private var colorBalanceGate: ModuleGate {
+        ModuleGate(hasAdjustments: { colorBalanceHasAdjustments(stage) }, setEnabled: { stage.editColorBalanceEnabled = $0 })
+    }
+
+    private var filmicGate: ModuleGate {
+        ModuleGate(hasAdjustments: { filmicHasAdjustments(stage) }, setEnabled: { stage.editFilmicEnabled = $0 })
+    }
+
+    private var rgbCurveGate: ModuleGate {
+        ModuleGate(hasAdjustments: { rgbCurveHasAdjustments(stage) }, setEnabled: { stage.editRGBCurveEnabled = $0 })
     }
 
     private func stageBoolBind(_ keyPath: ReferenceWritableKeyPath<Stage, Bool>) -> Binding<Bool> {

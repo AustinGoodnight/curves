@@ -113,13 +113,18 @@ struct ColorBalanceBarView: View {
                 case .classic:
                     HStack(alignment: .top, spacing: 20) {
                         verticalGradientSlider(
-                            "Temp", value: bind(\.editNeutralTemperature, fallback: coordinator.renderer.defaultNeutralTemperature),
+                            "Temp", value: bind(
+                                \.editNeutralTemperature, fallback: coordinator.renderer.defaultNeutralTemperature,
+                                module: whiteBalanceGate
+                            ),
                             range: 2000...12000, gradient: .neutralTemperature,
                             valueText: "\(Int((asset.editNeutralTemperature ?? coordinator.renderer.defaultNeutralTemperature).rounded()))K",
                             resetValue: coordinator.renderer.defaultNeutralTemperature
                         )
                         verticalGradientSlider(
-                            "Tint", value: bind(\.editNeutralTint, fallback: coordinator.renderer.defaultNeutralTint),
+                            "Tint", value: bind(
+                                \.editNeutralTint, fallback: coordinator.renderer.defaultNeutralTint, module: whiteBalanceGate
+                            ),
                             range: -150...150, gradient: .neutralTint,
                             valueText: formattedTint(asset.editNeutralTint ?? coordinator.renderer.defaultNeutralTint),
                             resetValue: coordinator.renderer.defaultNeutralTint
@@ -127,8 +132,11 @@ struct ColorBalanceBarView: View {
                     }
                 case .xy:
                     xyWhiteBalanceControl(
-                        temperature: bind(\.editNeutralTemperature, fallback: coordinator.renderer.defaultNeutralTemperature),
-                        tint: bind(\.editNeutralTint, fallback: coordinator.renderer.defaultNeutralTint),
+                        temperature: bind(
+                            \.editNeutralTemperature, fallback: coordinator.renderer.defaultNeutralTemperature,
+                            module: whiteBalanceGate
+                        ),
+                        tint: bind(\.editNeutralTint, fallback: coordinator.renderer.defaultNeutralTint, module: whiteBalanceGate),
                         temperatureRange: 2000...12000, tintRange: -150...150,
                         defaultTemperature: coordinator.renderer.defaultNeutralTemperature,
                         defaultTint: coordinator.renderer.defaultNeutralTint,
@@ -180,17 +188,19 @@ struct ColorBalanceBarView: View {
                     // decimal-place values ("−0.50", "45.00") were overflowing the pill and
                     // wrapping; Temp/Tint above don't have that problem, so they keep theirs.
                     verticalGradientSlider(
-                        "Chr", value: stageBind(\.editColorBalanceChromaGlobal, fallback: 0),
+                        "Chr", value: stageBind(\.editColorBalanceChromaGlobal, fallback: 0, module: balanceGate),
                         range: -0.5...0.5, gradient: .colorIntensity,
                         valueText: ""
                     )
                     verticalGradientSlider(
-                        "Vib", value: stageBind(\.editColorBalanceVibrance, fallback: 0),
+                        "Vib", value: stageBind(\.editColorBalanceVibrance, fallback: 0, module: balanceGate),
                         range: -0.5...0.5, gradient: .colorIntensity,
                         valueText: ""
                     )
                     verticalGradientSlider(
-                        "Sat", value: stageBind(\.editFilmicSaturation, fallback: FilmicRGBParameters.darktableDefault.saturation),
+                        "Sat", value: stageBind(
+                            \.editFilmicSaturation, fallback: FilmicRGBParameters.darktableDefault.saturation, module: balanceGate
+                        ),
                         range: -100...100, gradient: .colorIntensity,
                         valueText: "", resetValue: FilmicRGBParameters.darktableDefault.saturation
                     )
@@ -214,12 +224,14 @@ struct ColorBalanceBarView: View {
                 // wheels/Balance faders are per-stage.
                 if coordinator.isReady && coordinator.renderer.isSharpnessSupported {
                     verticalCircleSlider(
-                        "Sharp", value: bind(\.editSharpnessAmount, fallback: coordinator.renderer.defaultSharpnessAmount),
+                        "Sharp", value: bind(
+                            \.editSharpnessAmount, fallback: coordinator.renderer.defaultSharpnessAmount, module: detailGate
+                        ),
                         range: 0...1, valueText: "", resetValue: coordinator.renderer.defaultSharpnessAmount
                     )
                 }
                 verticalCircleSlider(
-                    "Dehaze", value: stageBind(\.editDehazeAmount, fallback: 0),
+                    "Dehaze", value: stageBind(\.editDehazeAmount, fallback: 0, module: detailGate),
                     range: 0...1, valueText: ""
                 )
             }
@@ -331,15 +343,21 @@ struct ColorBalanceBarView: View {
             yRange: yRange,
             diameter: wheelDiameter,
             onHueChange: { newValue in
+                let hadAdjustments = colorWheelsGate.hasAdjustments()
                 stage[keyPath: h] = newValue
+                syncModuleEnabled(colorWheelsGate, hadAdjustments: hadAdjustments)
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             },
             onChromaChange: { newValue in
+                let hadAdjustments = colorWheelsGate.hasAdjustments()
                 stage[keyPath: c] = newValue
+                syncModuleEnabled(colorWheelsGate, hadAdjustments: hadAdjustments)
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             },
             onLuminanceChange: { newValue in
+                let hadAdjustments = colorWheelsGate.hasAdjustments()
                 stage[keyPath: y] = newValue
+                syncModuleEnabled(colorWheelsGate, hadAdjustments: hadAdjustments)
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
@@ -351,24 +369,61 @@ struct ColorBalanceBarView: View {
         return rounded > 0 ? "+\(rounded)" : "\(rounded)"
     }
 
-    private func bind(_ keyPath: ReferenceWritableKeyPath<PhotoAsset, Double?>, fallback: Double) -> Binding<Double> {
+    /// `module`, when passed, keeps that module's own bypass switch synced to whether it still has
+    /// adjustments after this particular field's write — see `syncModuleEnabled`'s doc comment.
+    private func bind(
+        _ keyPath: ReferenceWritableKeyPath<PhotoAsset, Double?>, fallback: Double, module: ModuleGate? = nil
+    ) -> Binding<Double> {
         Binding(
             get: { asset[keyPath: keyPath] ?? fallback },
             set: { newValue in
+                let hadAdjustments = module?.hasAdjustments()
                 asset[keyPath: keyPath] = newValue
+                if let module, let hadAdjustments {
+                    syncModuleEnabled(module, hadAdjustments: hadAdjustments)
+                }
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
     }
 
-    private func stageBind(_ keyPath: ReferenceWritableKeyPath<Stage, Double?>, fallback: Double) -> Binding<Double> {
+    private func stageBind(
+        _ keyPath: ReferenceWritableKeyPath<Stage, Double?>, fallback: Double, module: ModuleGate? = nil
+    ) -> Binding<Double> {
         Binding(
             get: { stage[keyPath: keyPath] ?? fallback },
             set: { newValue in
+                let hadAdjustments = module?.hasAdjustments()
                 stage[keyPath: keyPath] = newValue
+                if let module, let hadAdjustments {
+                    syncModuleEnabled(module, hadAdjustments: hadAdjustments)
+                }
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
+    }
+
+    private var whiteBalanceGate: ModuleGate {
+        ModuleGate(hasAdjustments: { whiteBalanceHasAdjustments(asset) }, setEnabled: { asset.editWhiteBalanceEnabled = $0 })
+    }
+
+    private var colorWheelsGate: ModuleGate {
+        ModuleGate(hasAdjustments: { colorWheelsHasAdjustments(stage) }, setEnabled: { stage.editColorWheelsEnabled = $0 })
+    }
+
+    private var balanceGate: ModuleGate {
+        ModuleGate(hasAdjustments: { balanceGroupHasAdjustments(stage) }, setEnabled: { stage.editBalanceEnabled = $0 })
+    }
+
+    private var detailGate: ModuleGate {
+        ModuleGate(
+            hasAdjustments: { detailHasAdjustments(asset: asset, stage: stage) },
+            setEnabled: { asset.editDetailEnabled = $0 }
+        )
+    }
+
+    private var colorZonesGate: ModuleGate {
+        ModuleGate(hasAdjustments: { colorZonesHasAdjustments(stage) }, setEnabled: { stage.editColorZonesEnabled = $0 })
     }
 
     private func stageBoolBind(_ keyPath: ReferenceWritableKeyPath<Stage, Bool>) -> Binding<Bool> {
@@ -422,7 +477,7 @@ struct ColorBalanceBarView: View {
                 colorZonesChannelSwitcher
                 HStack(spacing: 8) {
                     Spacer(minLength: 0)
-                    resetButton(disabled: !colorZonesHasEdits(stage), action: {
+                    resetButton(disabled: !colorZonesHasAdjustments(stage), action: {
                         resetColorZones(stage)
                         scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                     })
@@ -447,8 +502,10 @@ struct ColorBalanceBarView: View {
                 lineColor: .white,
                 showGrid: true,
                 onPointsChange: { newPoints in
+                    let hadAdjustments = colorZonesGate.hasAdjustments()
                     let keyPath = colorZonesActiveKeyPath
                     stage[keyPath: keyPath] = newPoints.flatMap { [$0.x, $0.y] }
+                    syncModuleEnabled(colorZonesGate, hadAdjustments: hadAdjustments)
                     scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                 }
             )
@@ -540,7 +597,7 @@ struct ColorBalanceBarView: View {
                     "Film Simulation", enabled: stage.lut3DData != nil ? stageBoolBind(\.editLUT3DEnabled) : nil,
                     font: .caption.weight(.semibold)
                 )
-                resetButton(disabled: !lut3DHasEdits(stage), action: {
+                resetButton(disabled: !lut3DHasAdjustments(stage), action: {
                     resetLUT3D(stage)
                     scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                 })

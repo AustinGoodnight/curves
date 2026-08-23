@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import PhotoCatalog
 import RawEngine
@@ -16,7 +17,8 @@ func rawBaseParameters(for asset: PhotoAsset) -> RawBaseParameters {
         neutralTemperature: asset.editWhiteBalanceEnabled ? asset.editNeutralTemperature : nil,
         neutralTint: asset.editWhiteBalanceEnabled ? asset.editNeutralTint : nil,
         sharpnessAmount: asset.editDetailEnabled ? asset.editSharpnessAmount : nil,
-        lensCorrection: lensCorrectionParameters(for: asset)
+        lensCorrection: lensCorrectionParameters(for: asset),
+        crop: cropParameters(for: asset)
     )
 }
 
@@ -32,6 +34,21 @@ func lensCorrectionParameters(for asset: PhotoAsset) -> LensCorrectionParameters
     ) else { return nil }
     profile.intensity = asset.editLensCorrectionIntensity ?? 1
     return profile
+}
+
+/// `nil` whenever `asset` has no straighten/crop set at all — same "nil = no contribution"
+/// convention as every other base param, checked via the crop rect fields (all four are always set
+/// together by `CropEditorOverlay`, see their doc comment on `PhotoAsset`) rather than the angle
+/// alone, since a rect-only crop with zero rotation is still a real crop to apply.
+func cropParameters(for asset: PhotoAsset) -> CropParameters? {
+    guard asset.editCropAngleDegrees != nil || asset.editCropRectWidth != nil else { return nil }
+    return CropParameters(
+        angleDegrees: asset.editCropAngleDegrees ?? 0,
+        rect: CGRect(
+            x: asset.editCropRectX ?? 0, y: asset.editCropRectY ?? 0,
+            width: asset.editCropRectWidth ?? 1, height: asset.editCropRectHeight ?? 1
+        )
+    )
 }
 
 // MARK: - Stage params (the four stackable `CIColorKernel` modules)
@@ -187,58 +204,119 @@ func scheduleRender(for asset: PhotoAsset, activeStages: [Stage], coordinator: E
     )
 }
 
-// MARK: - Has-edits
+// MARK: - Module auto-toggle
 
-func dehazeHasEdits(_ stage: Stage) -> Bool {
+/// A module's own bypass switch, described generically enough to cover a `Stage`-level switch, a
+/// `PhotoAsset`-level switch, or (Detail's) one whose fields span both — the closures just close
+/// over whichever object(s) actually hold the relevant fields, so this one type serves every call
+/// site in `EditorSidebarView`/`ColorBalanceBarView` instead of a bespoke variant per owner type.
+struct ModuleGate {
+    let hasAdjustments: () -> Bool
+    let setEnabled: (Bool) -> Void
+}
+
+/// Keeps a module's bypass switch in sync with whether it actually holds any adjustments. Call
+/// with the module's `hasAdjustments` result from *before* the edit that just happened (`stageBind`/
+/// `bind`'s setters, and the few bespoke value-change closures, all do this around their own
+/// mutation). Forced off the instant a module empties out — there's no reason to keep paying a
+/// module's render cost (Filmic/Color Balance/RGB Curve/Color Zones are `CIColorKernel` passes,
+/// real cost even at neutral defaults, see `filmicParameters`'s doc comment) once nothing in it
+/// differs from the identity case. Forced *on* only on the transition from empty to non-empty —
+/// otherwise the very edit that just gave the module its first adjustment would silently not
+/// render. Never forces a module back on while it already had adjustments: that's what lets a user
+/// manually bypass a populated module (keeping its values, suppressing its effect) without a later
+/// edit to one of its *other* fields fighting the toggle back on.
+func syncModuleEnabled(_ gate: ModuleGate, hadAdjustments: Bool) {
+    let hasAdjustmentsNow = gate.hasAdjustments()
+    if !hasAdjustmentsNow {
+        gate.setEnabled(false)
+    } else if !hadAdjustments {
+        gate.setEnabled(true)
+    }
+}
+
+// MARK: - Has-adjustments
+
+func dehazeHasAdjustments(_ stage: Stage) -> Bool {
     stage.editDehazeAmount != nil
 }
 
-func filmicHasEdits(_ stage: Stage) -> Bool {
-    !stage.editFilmicEnabled
-        || stage.editFilmicWhitePointSource != nil || stage.editFilmicBlackPointSource != nil
+func filmicHasAdjustments(_ stage: Stage) -> Bool {
+    stage.editFilmicWhitePointSource != nil || stage.editFilmicBlackPointSource != nil
         || stage.editFilmicContrast != nil || stage.editFilmicLatitude != nil
         || stage.editFilmicSaturation != nil || stage.editFilmicBalance != nil
 }
 
-func colorBalanceHasEdits(_ stage: Stage) -> Bool {
-    !stage.editColorBalanceEnabled || !stage.editColorWheelsEnabled || !stage.editBalanceEnabled
-        || stage.editColorBalanceGlobalY != nil || stage.editColorBalanceGlobalC != nil || stage.editColorBalanceGlobalH != nil
+func colorWheelsHasAdjustments(_ stage: Stage) -> Bool {
+    stage.editColorBalanceGlobalY != nil || stage.editColorBalanceGlobalC != nil || stage.editColorBalanceGlobalH != nil
         || stage.editColorBalanceShadowsY != nil || stage.editColorBalanceShadowsC != nil || stage.editColorBalanceShadowsH != nil
         || stage.editColorBalanceMidtonesY != nil || stage.editColorBalanceMidtonesC != nil || stage.editColorBalanceMidtonesH != nil
         || stage.editColorBalanceHighlightsY != nil || stage.editColorBalanceHighlightsC != nil || stage.editColorBalanceHighlightsH != nil
-        || stage.editColorBalanceContrast != nil || stage.editColorBalanceVibrance != nil || stage.editColorBalanceChromaGlobal != nil
 }
 
-func rgbCurveHasEdits(_ stage: Stage) -> Bool {
-    !stage.editRGBCurveEnabled || stage.editRGBCurvePoints != nil || stage.editRGBCurvePreserveColors != nil
-        || stage.editRGBCurveBlackLift != nil
+func balanceGroupHasAdjustments(_ stage: Stage) -> Bool {
+    stage.editColorBalanceChromaGlobal != nil || stage.editColorBalanceVibrance != nil || stage.editFilmicSaturation != nil
 }
 
-func colorZonesHasEdits(_ stage: Stage) -> Bool {
-    !stage.editColorZonesEnabled
-        || stage.editColorZonesLightnessPoints != nil || stage.editColorZonesChromaPoints != nil
+/// The whole Color Balance RGB module's own adjustments, spanning both sub-groups (Wheels/
+/// Balance) plus Contrast, which has no sub-group switch of its own — see
+/// `Stage.editColorBalanceContrast`'s doc comment.
+func colorBalanceHasAdjustments(_ stage: Stage) -> Bool {
+    colorWheelsHasAdjustments(stage) || balanceGroupHasAdjustments(stage) || stage.editColorBalanceContrast != nil
+}
+
+func rgbCurveHasAdjustments(_ stage: Stage) -> Bool {
+    stage.editRGBCurvePoints != nil || stage.editRGBCurvePreserveColors != nil || stage.editRGBCurveBlackLift != nil
+}
+
+func colorZonesHasAdjustments(_ stage: Stage) -> Bool {
+    stage.editColorZonesLightnessPoints != nil || stage.editColorZonesChromaPoints != nil
         || stage.editColorZonesHuePoints != nil
 }
 
-func lut3DHasEdits(_ stage: Stage) -> Bool {
-    stage.lut3DData != nil || !stage.editLUT3DEnabled || stage.lut3DIntensity != nil
+func lut3DHasAdjustments(_ stage: Stage) -> Bool {
+    stage.lut3DData != nil
+}
+
+func whiteBalanceHasAdjustments(_ asset: PhotoAsset) -> Bool {
+    asset.editNeutralTemperature != nil || asset.editNeutralTint != nil
+}
+
+/// Spans both `asset` (Sharpness) and `stage` (Dehaze) — "Detail" is the one bypass switch that
+/// gates fields living on two different owners, see `PhotoAsset.editDetailEnabled`'s doc comment.
+func detailHasAdjustments(asset: PhotoAsset, stage: Stage) -> Bool {
+    asset.editSharpnessAmount != nil || stage.editDehazeAmount != nil
 }
 
 /// Whether `stage` itself carries any adjustments — used to grey out per-stage reset buttons and
-/// (via `hasAnyEdits`) "Reset All".
+/// (via `hasAnyEdits`) "Reset All". Each module's own bypass switch is kept in sync with this by
+/// `syncModuleEnabled`, so — unlike before this existed — a disabled switch never needs checking
+/// here separately: a module left enabled with nothing set, or disabled while still holding
+/// values, are exactly the two states `syncModuleEnabled` guards against/preserves respectively.
 func stageHasEdits(_ stage: Stage) -> Bool {
-    dehazeHasEdits(stage) || filmicHasEdits(stage) || colorBalanceHasEdits(stage) || rgbCurveHasEdits(stage)
-        || colorZonesHasEdits(stage) || lut3DHasEdits(stage)
+    dehazeHasAdjustments(stage) || filmicHasAdjustments(stage) || colorBalanceHasAdjustments(stage)
+        || rgbCurveHasAdjustments(stage) || colorZonesHasAdjustments(stage) || lut3DHasAdjustments(stage)
 }
 
 /// Whether there's anything for "Reset All" to do — the asset's base params plus whichever stage
 /// is currently selected for editing. Scoped to the selected stage rather than every active stage
 /// so "Reset All" only ever touches what's currently on screen, matching the "blank slate"
-/// editing model (see `Stage`'s doc comment).
+/// editing model (see `Stage`'s doc comment). Lens correction keeps its own explicit
+/// `!editLensCorrectionEnabled` check (unlike every other module here) because it's the one switch
+/// that's meaningfully "on" even with zero adjustments — see
+/// `PhotoAsset.editLensCorrectionEnabled`'s doc comment for why it's on-by-default rather than an
+/// opt-in module like the others.
+/// Whether `asset` has a straighten angle or crop rect set — see the crop fields' doc comment on
+/// `PhotoAsset` for why checking the rect's width alone is enough (all four rect fields are always
+/// set together).
+func cropHasAdjustments(_ asset: PhotoAsset) -> Bool {
+    asset.editCropAngleDegrees != nil || asset.editCropRectWidth != nil
+}
+
 func hasAnyEdits(asset: PhotoAsset, stage: Stage) -> Bool {
-    asset.editExposure != nil || asset.editNeutralTemperature != nil || asset.editNeutralTint != nil
-        || asset.editSharpnessAmount != nil || !asset.editWhiteBalanceEnabled || !asset.editDetailEnabled
+    asset.editExposure != nil || whiteBalanceHasAdjustments(asset) || asset.editSharpnessAmount != nil
         || !asset.editLensCorrectionEnabled || asset.editLensCorrectionIntensity != nil
+        || cropHasAdjustments(asset)
         || stageHasEdits(stage)
 }
 
@@ -249,7 +327,7 @@ func resetDehaze(_ stage: Stage) {
 }
 
 func resetFilmic(_ stage: Stage) {
-    stage.editFilmicEnabled = true
+    stage.editFilmicEnabled = false
     stage.editFilmicWhitePointSource = nil
     stage.editFilmicBlackPointSource = nil
     stage.editFilmicContrast = nil
@@ -259,9 +337,9 @@ func resetFilmic(_ stage: Stage) {
 }
 
 func resetColorBalance(_ stage: Stage) {
-    stage.editColorBalanceEnabled = true
-    stage.editColorWheelsEnabled = true
-    stage.editBalanceEnabled = true
+    stage.editColorBalanceEnabled = false
+    stage.editColorWheelsEnabled = false
+    stage.editBalanceEnabled = false
     stage.editColorBalanceGlobalY = nil
     stage.editColorBalanceGlobalC = nil
     stage.editColorBalanceGlobalH = nil
@@ -280,25 +358,33 @@ func resetColorBalance(_ stage: Stage) {
 }
 
 func resetRGBCurve(_ stage: Stage) {
-    stage.editRGBCurveEnabled = true
+    stage.editRGBCurveEnabled = false
     stage.editRGBCurvePoints = nil
     stage.editRGBCurvePreserveColors = nil
     stage.editRGBCurveBlackLift = nil
 }
 
 func resetColorZones(_ stage: Stage) {
-    stage.editColorZonesEnabled = true
+    stage.editColorZonesEnabled = false
     stage.editColorZonesLightnessPoints = nil
     stage.editColorZonesChromaPoints = nil
     stage.editColorZonesHuePoints = nil
 }
 
 func resetLUT3D(_ stage: Stage) {
-    stage.editLUT3DEnabled = true
+    stage.editLUT3DEnabled = false
     stage.lut3DData = nil
     stage.lut3DSize = nil
     stage.lut3DTitle = nil
     stage.lut3DIntensity = nil
+}
+
+func resetCrop(_ asset: PhotoAsset) {
+    asset.editCropAngleDegrees = nil
+    asset.editCropRectX = nil
+    asset.editCropRectY = nil
+    asset.editCropRectWidth = nil
+    asset.editCropRectHeight = nil
 }
 
 func resetAllEdits(asset: PhotoAsset, stage: Stage) {
@@ -306,10 +392,11 @@ func resetAllEdits(asset: PhotoAsset, stage: Stage) {
     asset.editNeutralTemperature = nil
     asset.editNeutralTint = nil
     asset.editSharpnessAmount = nil
-    asset.editWhiteBalanceEnabled = true
-    asset.editDetailEnabled = true
+    asset.editWhiteBalanceEnabled = false
+    asset.editDetailEnabled = false
     asset.editLensCorrectionEnabled = true
     asset.editLensCorrectionIntensity = nil
+    resetCrop(asset)
     resetDehaze(stage)
     resetFilmic(stage)
     resetColorBalance(stage)

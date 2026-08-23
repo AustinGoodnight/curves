@@ -36,6 +36,10 @@ struct ContentView: View {
 
     @State private var selectedScene: PhotoScene?
     @State private var selectedSession: Session?
+    /// Persists which session was last opened so the sidebar/grid reopen to it — there's no more
+    /// "All Photos" library view to fall back to. Restored once in `.task` below (sessions may not
+    /// be selectable yet at `@State` init time), and updated on every `selectedSession` change.
+    @AppStorage("lastOpenedSessionID") private var lastOpenedSessionIDString = ""
     @State private var importStatus: String?
     @State private var isShowingSessionPicker = false
     @State private var pendingImportFiles: [URL] = []
@@ -49,7 +53,53 @@ struct ContentView: View {
     /// back — this only sets the *default*, it doesn't lock the column closed.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
 
+    /// Body itself is just `rootView` plus every `.onChange`/`.task` side-effect hook, kept as a
+    /// separate expression from `rootView` (which carries `NavigationSplitView` plus its
+    /// `.background`/`.alert`/`.sheet` chain) purely so Swift's type-checker has two smaller
+    /// expressions to solve instead of one giant one — seven `.onChange` handlers plus `.task`
+    /// chained directly onto the alert/sheet chain below was enough, once `isCullingViewActive`'s
+    /// handler was added, to blow past the checker's time limit (`error: the compiler is unable to
+    /// type-check this expression in reasonable time`) with no behavior change either side of the
+    /// split.
     var body: some View {
+        rootView
+            .onChange(of: detailStore.selection) { _, _ in detailStore.refreshSelectionDerivedState(allAssets: allAssets, scenes: scenes) }
+            .onChange(of: detailStore.editingAsset) { _, _ in
+                detailStore.refreshSelectionDerivedState(allAssets: allAssets, scenes: scenes)
+                updateSidebarVisibility()
+            }
+            .onChange(of: detailStore.isCullingViewActive) { _, _ in
+                updateSidebarVisibility()
+            }
+            .onChange(of: selectedScene) { _, _ in refreshFilteredAssets() }
+            .onChange(of: selectedSession) { _, newValue in
+                refreshFilteredAssets()
+                lastOpenedSessionIDString = newValue?.id.uuidString ?? ""
+            }
+            .onChange(of: detailStore.ratingFilter) { _, _ in refreshFilteredAssets() }
+            .onChange(of: detailStore.flagFilter) { _, _ in refreshFilteredAssets() }
+            .onChange(of: detailStore.sortOption) { _, _ in refreshFilteredAssets() }
+            .onChange(of: detailStore.gridMode) { _, newMode in
+                switch newMode {
+                case .edit:
+                    guard detailStore.editingAsset == nil, detailStore.selection.count == 1, let id = detailStore.selection.first,
+                          let asset = allAssets.first(where: { $0.id == id }) else { return }
+                    openEditor(for: asset)
+                case .sessions:
+                    guard detailStore.editingAsset != nil else { return }
+                    closeEditor()
+                }
+            }
+            .task {
+                backfillMissingSessions()
+                cleanupLegacyStackKindStages()
+                backfillMissingStackStages()
+                restoreLastOpenedSession()
+                refreshFilteredAssets()
+            }
+    }
+
+    private var rootView: some View {
         NavigationSplitView(columnVisibility: $sidebarVisibility) {
             SidebarView(
                 sessions: sessions,
@@ -66,37 +116,13 @@ struct ContentView: View {
             )
             .equatable()
         } detail: {
-            // Grid and editor are swapped in place here rather than the editor being pushed via
-            // `navigationDestination` (as it used to be) — that let each screen have its own
-            // toolbar, which is exactly what made the Sessions/Edit toggle *not* persistent: it
-            // simply didn't exist on the editor's separate toolbar. One shared `toolbarContent`
-            // below, attached once, is what makes it persistent across both. `editingAsset == nil`
-            // still gates `GridPane`'s *construction* here, not just its body — see this file's
-            // header comment (trap #3) for why that distinction matters. `.id(editingAsset.id)` on
-            // the editor branch forces a fresh `EditorView` (fresh `@State` coordinator/stage) every
-            // time `editingAsset` changes — including a direct switch from one photo to another via
-            // `SessionFilmstripView`/`StagesSidebarView`'s "Stack" section, which never passes
-            // through `nil`. Without this, the `if`/`else` branch alone gives SwiftUI no reason to
-            // recreate the view for a same-branch identity change, and the coordinator/stage state
-            // from the *previous* photo would leak into the new one.
-            Group {
-                if let editingAsset = detailStore.editingAsset {
-                    EditorView(asset: editingAsset, onSelectAsset: openEditor)
-                        .id(editingAsset.id)
-                } else {
-                    GridPane(
-                        allAssets: allAssets, selectedScene: selectedScene, selectedSession: selectedSession,
-                        store: detailStore, onGroupStack: groupSelectedIntoStack, onUnstack: unstackSelected,
-                        onOpenEditor: openEditor
-                    )
-                    .equatable()
-                    .id(detailStore.refreshTrigger)
-                }
-            }
-            .navigationTitle(detailStore.editingAsset?.fileName ?? selectedScene?.name ?? selectedSession?.name ?? "PhotoCull")
-            .toolbar { toolbarContent }
-            .toolbarBackground(Color.sidebarBackground, for: .windowToolbar)
-            .toolbarBackground(.visible, for: .windowToolbar)
+            // See `detailContent`'s doc comment for why the grid/editor/culling-view switch lives
+            // in its own computed property rather than inline here.
+            detailContent
+                .navigationTitle(detailStore.editingAsset?.fileName ?? selectedScene?.name ?? selectedSession?.name ?? "PhotoCull")
+                .toolbar { toolbarContent }
+                .toolbarBackground(Color.sidebarBackground, for: .windowToolbar)
+                .toolbarBackground(.visible, for: .windowToolbar)
         }
         .background {
             Button("Add Selected to Scene") {
@@ -117,7 +143,11 @@ struct ContentView: View {
         }
         .alert("New Scene", isPresented: $detailStore.isShowingNewSceneAlert) {
             TextField("Scene Name", text: $detailStore.newSceneName)
-            Button("Cancel", role: .cancel) { detailStore.newSceneName = ""; detailStore.newSceneSession = nil }
+            Button("Cancel", role: .cancel) {
+                detailStore.newSceneName = ""
+                detailStore.newSceneSession = nil
+                detailStore.pendingSceneAssetIDs = []
+            }
             Button("Create") { createScene(named: detailStore.newSceneName, addSelection: detailStore.addSelectionToNewScene) }
         } message: {
             Text("Enter a name for the new scene.")
@@ -159,37 +189,33 @@ struct ContentView: View {
                 onCancel: { detailStore.isShowingScenePicker = false }
             )
         }
-        .onChange(of: detailStore.selection) { _, _ in detailStore.refreshSelectionDerivedState(allAssets: allAssets, scenes: scenes) }
-        .onChange(of: detailStore.editingAsset) { _, newValue in
-            detailStore.refreshSelectionDerivedState(allAssets: allAssets, scenes: scenes)
-            sidebarVisibility = newValue == nil ? .all : .detailOnly
-        }
-        .onChange(of: selectedScene) { _, _ in refreshFilteredAssets() }
-        .onChange(of: selectedSession) { _, _ in refreshFilteredAssets() }
-        .onChange(of: detailStore.ratingFilter) { _, _ in refreshFilteredAssets() }
-        .onChange(of: detailStore.flagFilter) { _, _ in refreshFilteredAssets() }
-        .onChange(of: detailStore.sortOption) { _, _ in refreshFilteredAssets() }
-        .onChange(of: detailStore.gridMode) { _, newMode in
-            switch newMode {
-            case .edit:
-                guard detailStore.editingAsset == nil, detailStore.selection.count == 1, let id = detailStore.selection.first,
-                      let asset = allAssets.first(where: { $0.id == id }) else { return }
-                openEditor(for: asset)
-            case .sessions:
-                guard detailStore.editingAsset != nil else { return }
-                closeEditor()
-            }
-        }
-        .task {
-            backfillMissingSessions()
-            cleanupLegacyStackKindStages()
-            backfillMissingStackStages()
-            refreshFilteredAssets()
-        }
     }
 
     private func refreshFilteredAssets() {
         detailStore.refreshFilteredAssets(allAssets: allAssets, selectedScene: selectedScene, selectedSession: selectedSession)
+    }
+
+    /// The Library/Sessions/Scenes sidebar has nothing to do with editing or reviewing a single
+    /// photo — collapsed by default (still manually reopenable) whenever either full-window mode
+    /// is active, same reasoning as the editor's own sidebar-collapse behavior documented on
+    /// `sidebarVisibility`'s declaration.
+    private func updateSidebarVisibility() {
+        sidebarVisibility = (detailStore.editingAsset != nil || detailStore.isCullingViewActive) ? .detailOnly : .all
+    }
+
+    /// Runs once at launch, after `backfillMissingSessions()` so a brand-new "Imported Library"
+    /// session (if any) is already in `sessions`. Prefers the persisted last-opened session; if
+    /// that session was deleted (or this is the first launch since this feature shipped, so
+    /// nothing's persisted yet) falls back to the most recent session, if any exist. Leaves
+    /// `selectedSession` `nil` — showing no session — only when the library truly has none.
+    private func restoreLastOpenedSession() {
+        guard selectedSession == nil else { return }
+        if let uuid = UUID(uuidString: lastOpenedSessionIDString),
+           let match = sessions.first(where: { $0.id == uuid }) {
+            selectedSession = match
+        } else {
+            selectedSession = sessions.first
+        }
     }
 
     private func openEditor(for asset: PhotoAsset) {
@@ -247,6 +273,48 @@ struct ContentView: View {
         try? modelContext.save()
     }
 
+    /// Pulled out of `body` into its own computed property purely to keep the type-checker fast —
+    /// a 3-way `if`/`else if`/`else` `Group` with a long trailing modifier chain (`.navigationTitle`/
+    /// `.toolbar`/two `.toolbarBackground`s) directly inline in `NavigationSplitView`'s `detail:`
+    /// closure pushed Swift's expression type-checker over its time limit (`error: the compiler is
+    /// unable to type-check this expression in reasonable time`); splitting the branch itself into
+    /// a separate expression the compiler can solve on its own fixes that with no behavior change.
+    /// Grid and editor (and now the culling view) are swapped in place here rather than pushed via
+    /// `navigationDestination` (as it used to be) — that let each screen have its own toolbar,
+    /// which is exactly what made the Sessions/Edit toggle *not* persistent: it simply didn't exist
+    /// on the editor's separate toolbar. One shared `toolbarContent`, attached once at this
+    /// property's use site, is what makes it persistent across all three. `editingAsset == nil`/
+    /// `isCullingViewActive` still gate `GridPane`'s and `CullingPresentationView`'s *construction*
+    /// here, not just their bodies — see this file's header comment (trap #3) for why that
+    /// distinction matters. `.id(editingAsset.id)` on the editor branch forces a fresh `EditorView`
+    /// (fresh `@State` coordinator/stage) every time `editingAsset` changes — including a direct
+    /// switch from one photo to another via `SessionFilmstripView`/`StagesSidebarView`'s "Stack"
+    /// section, which never passes through `nil`. Without this, the `if`/`else` branch alone gives
+    /// SwiftUI no reason to recreate the view for a same-branch identity change, and the
+    /// coordinator/stage state from the *previous* photo would leak into the new one.
+    @ViewBuilder
+    private var detailContent: some View {
+        if let editingAsset = detailStore.editingAsset {
+            EditorView(asset: editingAsset, onSelectAsset: openEditor)
+                .id(editingAsset.id)
+        } else if detailStore.isCullingViewActive {
+            CullingPresentationView(
+                store: detailStore,
+                onOpenEditor: openEditor,
+                onDataChanged: { detailStore.refreshFilteredAssets(allAssets: allAssets, selectedScene: selectedScene, selectedSession: selectedSession) },
+                onCreateScene: beginSceneCreation
+            )
+        } else {
+            GridPane(
+                allAssets: allAssets, selectedScene: selectedScene, selectedSession: selectedSession,
+                store: detailStore, onGroupStack: groupSelectedIntoStack, onUnstack: unstackSelected,
+                onOpenEditor: openEditor
+            )
+            .equatable()
+            .id(detailStore.refreshTrigger)
+        }
+    }
+
     /// Built once, attached in one place (`detail`'s `.toolbar` above), and shared by both the grid
     /// and the editor now that the editor is swapped in rather than pushed — see the comment on the
     /// `Group` in `body` for why that's what makes the Mode picker persistent. The icon cluster only
@@ -298,23 +366,17 @@ struct ContentView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Picker("Minimum Rating", selection: $detailStore.ratingFilter) {
-                        Text("All Ratings").tag(0)
-                        ForEach(1...5, id: \.self) { r in
-                            Text("\(r)+ Stars").tag(r)
-                        }
-                    }
-                    Divider()
-                    Picker("Flag", selection: $detailStore.flagFilter) {
-                        Text("All Flags").tag(FlagState?.none)
-                        Text("Picked").tag(FlagState?.some(.pick))
-                        Text("Rejected").tag(FlagState?.some(.reject))
-                        Text("Unflagged").tag(FlagState?.some(.none))
-                    }
-                } label: {
-                    Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
+                RatingFilterControl(store: detailStore)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                FlagFilterControl(store: detailStore)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Toggle(isOn: $detailStore.isCullingViewActive) {
+                    Label("Culling View", systemImage: "rectangle.center.inset.filled")
                 }
+                .toggleStyle(.button)
+                .help("Culling View — review and grade one photo at a time")
             }
         } else {
             ToolbarItem(placement: .primaryAction) {
@@ -440,12 +502,21 @@ struct ContentView: View {
         refreshFilteredAssets()
     }
 
+    /// `pendingSceneAssetIDs` (set by `beginSceneCreation(for:)`, the culling view's "S" scene-mark
+    /// shortcut) takes priority over `addSelection`/`selection` when present — see its doc comment
+    /// on `DetailStore` for why.
     private func createScene(named name: String, addSelection: Bool) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let session = detailStore.newSceneSession else { return }
         let scene = PhotoScene(name: trimmed, session: session)
         modelContext.insert(scene)
-        if addSelection {
+        if !detailStore.pendingSceneAssetIDs.isEmpty {
+            let targeted = allAssets.filter { detailStore.pendingSceneAssetIDs.contains($0.id) }
+            for asset in targeted {
+                asset.scene = scene
+            }
+            detailStore.pendingSceneAssetIDs = []
+        } else if addSelection {
             let selected = allAssets.filter { detailStore.selection.contains($0.id) }
             for asset in selected {
                 asset.scene = scene
@@ -458,6 +529,22 @@ struct ContentView: View {
         selectedSession = session
         detailStore.refreshTrigger += 1
         refreshFilteredAssets()
+    }
+
+    /// Wired to `CullingPresentationView.onCreateScene`, fired when the culling view's "S"
+    /// scene-mark shortcut closes a range. Reuses the same "New Scene" naming alert every other
+    /// scene-creation path uses (`detailStore.isShowingNewSceneAlert`) rather than a bespoke one —
+    /// `createScene(named:addSelection:)` picks up `pendingSceneAssetIDs` set here ahead of
+    /// `selection` once the user actually names and confirms it. Silently does nothing if the
+    /// marked range spans more than one session — a scene can't straddle sessions, and there's no
+    /// sensible single session to pre-fill the alert with, so surfacing this as a hard error would
+    /// be disproportionate to a rare mis-mark.
+    private func beginSceneCreation(for rangeAssets: [PhotoAsset]) {
+        guard let first = rangeAssets.first?.session, rangeAssets.allSatisfy({ $0.session?.id == first.id }) else { return }
+        detailStore.pendingSceneAssetIDs = Set(rangeAssets.map(\.id))
+        detailStore.newSceneName = ""
+        detailStore.newSceneSession = first
+        detailStore.isShowingNewSceneAlert = true
     }
 
     private func quickCreateAndAssignScene(named name: String) {

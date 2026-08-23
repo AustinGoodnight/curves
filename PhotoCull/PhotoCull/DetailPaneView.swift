@@ -31,6 +31,11 @@ final class DetailStore {
     var selection: Set<UUID> = []
     var editingAsset: PhotoAsset?
     var gridMode: GridMode = .sessions
+    /// Toggled from the toolbar's "Culling View" button, like a full-screen toggle — swaps the
+    /// grid for `CullingPresentationView`'s one-photo-at-a-time review screen. Low-frequency (one
+    /// user click/`Esc` per session), so it's fine to live here and be read directly in
+    /// `ContentView.body`/`toolbarContent`, unlike `selection`/`editingAsset`.
+    var isCullingViewActive: Bool = false
     var ratingFilter: Int = 0
     var flagFilter: FlagState?
     var sortOption: SortOption = .captureDateDesc
@@ -46,6 +51,11 @@ final class DetailStore {
     var newSceneSession: Session?
     var isShowingScenePicker = false
     var quickSceneName = ""
+    /// Set by `ContentView.beginSceneCreation(for:)` (the culling view's "S" scene-mark shortcut)
+    /// right before it opens the same "New Scene" alert used everywhere else. Non-empty takes
+    /// priority over `addSelectionToNewScene`/`selection` in `ContentView.createScene(named:addSelection:)`
+    /// — a specific, already-computed asset range rather than "whatever's currently selected".
+    var pendingSceneAssetIDs: Set<UUID> = []
 
     /// The single session shared by every currently-selected asset, or `nil` if the selection is
     /// empty or spans more than one session — see `refreshSelectionDerivedState`.
@@ -233,6 +243,11 @@ struct GridPane: View, Equatable {
                 )
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            if !allAssets.isEmpty {
+                ExportBarView(store: store)
+            }
+        }
     }
 }
 
@@ -253,6 +268,57 @@ struct EditButton: View {
             Label("Edit…", systemImage: "slider.horizontal.3")
         }
         .disabled(store.selection.count != 1)
+    }
+}
+
+/// Pulled out of `ContentView.toolbarContent` on purpose, same reasoning as `EditButton` — this
+/// reads `store.ratingFilter` as a value, so as its own `View` type only *this* small view's
+/// `body` re-runs when the rating filter changes. Five stars, shown inline in the toolbar rather
+/// than behind a menu, set a *minimum* rating (Lightroom-style): tapping star N shows N+ stars;
+/// tapping the already-active star again clears the filter back to "All Ratings".
+struct RatingFilterControl: View {
+    @Bindable var store: DetailStore
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(1...5, id: \.self) { star in
+                Button {
+                    store.ratingFilter = (store.ratingFilter == star) ? 0 : star
+                } label: {
+                    Image(systemName: star <= store.ratingFilter ? "star.fill" : "star")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(star <= store.ratingFilter ? Color.yellow : Color.secondary)
+            }
+        }
+        .help("Filter by minimum rating")
+    }
+}
+
+/// Pulled out of `ContentView.toolbarContent` on purpose, same reasoning as `RatingFilterControl`
+/// — reads `store.flagFilter` as a value. Three toggle buttons shown inline rather than behind a
+/// menu; tapping the active flag again clears the filter back to "All Flags".
+struct FlagFilterControl: View {
+    @Bindable var store: DetailStore
+
+    var body: some View {
+        HStack(spacing: 6) {
+            flagButton(.pick, systemImage: "flag.fill", color: .green, help: "Picked")
+            flagButton(.reject, systemImage: "flag.slash.fill", color: .red, help: "Rejected")
+            flagButton(.none, systemImage: "flag", color: .secondary, help: "Unflagged")
+        }
+    }
+
+    private func flagButton(_ flag: FlagState, systemImage: String, color: Color, help: String) -> some View {
+        let isSelected = store.flagFilter == flag
+        return Button {
+            store.flagFilter = isSelected ? nil : flag
+        } label: {
+            Image(systemName: systemImage)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? color : Color.secondary)
+        .help(help)
     }
 }
 

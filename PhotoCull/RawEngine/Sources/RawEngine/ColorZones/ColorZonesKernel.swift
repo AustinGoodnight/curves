@@ -120,8 +120,13 @@ public enum ColorZonesKernel {
         float a = lab.y;
         float b = lab.z;
         float twoPi = 6.283185307179586;
-        float hue = fract((atan(b, a) + twoPi) / twoPi);
         float C = length(vec2(a, b));
+        // atan2(y, x) is undefined (NaN on this hardware) when x == 0 and y == 0 — i.e. exactly
+        // neutral/black pixels, which are common here since Filmic RGB and Color Balance RGB
+        // (upstream of this kernel) both clip their output to [0, 1]. Falls back to hue = 0,
+        // which is safe: as C -> 0, blend -> 1 below, making the curves' output independent of
+        // hue anyway (Lm/hm -> 0, Cm -> 1, a true no-op regardless of which hue we picked).
+        float hue = C > 1e-6 ? fract((atan(b, a) + twoPi) / twoPi) : 0.0;
 
         float select = hue;
         float oneMinus = 1.0 - C / 128.0;

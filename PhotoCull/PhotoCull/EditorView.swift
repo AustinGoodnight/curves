@@ -42,6 +42,10 @@ struct EditorView: View {
     /// editor instead of the brush one; the two are mutually exclusive in practice since only one
     /// "Edit"/"Adjust" action can be in flight at a time.
     @State private var gradientEditingStage: Stage?
+    /// Set while `CropEditorOverlay` is open — same role as `gradientEditingStage`, just asset-level
+    /// (crop/straighten isn't per-`Stage`, see `CropParameters`'s doc comment) so a plain `Bool`
+    /// rather than an optional `Stage`.
+    @State private var cropEditing = false
     /// Which of `previewBackgroundPalette` the preview pane's backdrop currently shows — purely a
     /// viewing aid (checking how the image reads against different surrounds), not part of the
     /// edit itself, so this is plain local `@State`, not persisted or threaded into `scheduleRender`.
@@ -78,7 +82,8 @@ struct EditorView: View {
                     history: history,
                     onSelectAsset: onSelectAsset,
                     onEditMask: { maskEditingStage = $0 },
-                    onEditGradientMask: { gradientEditingStage = $0 }
+                    onEditGradientMask: { gradientEditingStage = $0 },
+                    onEditCrop: { cropEditing = true }
                 )
                 .frame(minWidth: 160, idealWidth: 200, maxWidth: 280)
 
@@ -99,6 +104,16 @@ struct EditorView: View {
                             previewImage: previewImage,
                             onFinished: {
                                 self.gradientEditingStage = nil
+                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                            }
+                        )
+                    } else if cropEditing, coordinator.isReady {
+                        CropEditorOverlay(
+                            asset: asset,
+                            activeStages: activeStages,
+                            coordinator: coordinator,
+                            onFinished: {
+                                cropEditing = false
                                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                             }
                         )

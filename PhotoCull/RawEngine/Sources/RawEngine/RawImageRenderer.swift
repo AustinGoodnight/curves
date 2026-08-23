@@ -128,6 +128,9 @@ public final class RawImageRenderer {
         for stage in stageStack where !stage.isEmpty {
             output = applyStage(stage, to: output)
         }
+        if let crop = baseParams.crop {
+            output = CropTransform.apply(to: output, params: crop)
+        }
         let extent = output.extent
         let longestSide = max(extent.width, extent.height)
         let scale = longestSide > maxPixelSize ? maxPixelSize / longestSide : 1
@@ -135,8 +138,12 @@ public final class RawImageRenderer {
         return context.createCGImage(scaled, from: scaled.extent)
     }
 
-    /// Renders at full native resolution, for export.
-    public func renderFullResolution(baseParams: RawBaseParameters, stageStack: [StageParameters]) -> CGImage? {
+    /// Renders at full native resolution, for export. `maxLongEdge`, when given, downscales the
+    /// final composited image to fit that many pixels on its longer side — same tail-end scaling
+    /// `renderPreview` does, just applied after the full-resolution demosaic/stage stack rather
+    /// than before it, so a resized export still benefits from filtering/grading computed at full
+    /// detail instead of at the smaller output size.
+    public func renderFullResolution(baseParams: RawBaseParameters, stageStack: [StageParameters], maxLongEdge: CGFloat? = nil) -> CGImage? {
         guard let filter else { return nil }
         apply(baseParams)
         filter.scaleFactor = 1
@@ -147,6 +154,17 @@ public final class RawImageRenderer {
         }
         for stage in stageStack where !stage.isEmpty {
             output = applyStage(stage, to: output)
+        }
+        if let crop = baseParams.crop {
+            output = CropTransform.apply(to: output, params: crop)
+        }
+        if let maxLongEdge {
+            let extent = output.extent
+            let longestSide = max(extent.width, extent.height)
+            if longestSide > maxLongEdge {
+                let scale = maxLongEdge / longestSide
+                output = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            }
         }
         return context.createCGImage(output, from: output.extent)
     }

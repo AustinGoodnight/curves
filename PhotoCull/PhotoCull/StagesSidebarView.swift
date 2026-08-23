@@ -35,6 +35,9 @@ struct StagesSidebarView: View {
     /// `.linearGradientMask`/`.radialGradientMask` stage — same two call sites as `onEditMask`,
     /// just routed to the gradient-handle editor instead of the brush one.
     var onEditGradientMask: (Stage) -> Void
+    /// Enters `CropEditorOverlay` (`EditorView.cropEditing`) — asset-level, so unlike
+    /// `onEditMask`/`onEditGradientMask` this takes no stage argument.
+    var onEditCrop: () -> Void
     @Environment(\.modelContext) private var modelContext
 
     @State private var renamingStage: Stage?
@@ -88,6 +91,15 @@ struct StagesSidebarView: View {
 
     var body: some View {
         List {
+            Button {
+                onEditCrop()
+            } label: {
+                Label(
+                    cropHasAdjustments(asset) ? "Adjust Crop & Straighten…" : "Crop & Straighten…",
+                    systemImage: "crop.rotate"
+                )
+            }
+            .buttonStyle(.plain)
             Section("Stages") {
                 if let sceneStage = asset.scene?.stage {
                     row(for: sceneStage, title: asset.scene.map { "Scene: \($0.name)" } ?? "Scene")

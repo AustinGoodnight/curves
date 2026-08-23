@@ -45,17 +45,24 @@ public final class PhotoAsset {
     public var editSharpnessAmount: Double?
 
     /// Module bypass switches for the two asset-level (non-stackable) groups in
-    /// `ColorBalanceBarView` — "WB" and "Detail". `true` (the default) means apply whatever's
-    /// stored above/on the relevant `Stage`; `false` renders as if untouched (native as-shot WB;
-    /// native sharpness; no Dehaze contribution from any stage) without discarding the stored
-    /// values, so re-enabling restores exactly what was there. Asset-level (not per-`Stage`, unlike
-    /// the four kernel-module `isEnabled` switches on `Stage`) because every field they gate —
-    /// Temp/Tint/Sharpness — already lives directly on `PhotoAsset` for the same "not stackable per
-    /// stage" reason (see the doc comment above); "Detail" additionally suppresses Dehaze's
-    /// contribution from every active `Stage` uniformly rather than per-stage, since there's no
-    /// single "the stage this toggle belongs to" once more than one stage is active at once.
-    public var editWhiteBalanceEnabled: Bool = true
-    public var editDetailEnabled: Bool = true
+    /// `ColorBalanceBarView` — "WB" and "Detail". `true` means apply whatever's stored above/on the
+    /// relevant `Stage`; `false` renders as if untouched (native as-shot WB; native sharpness; no
+    /// Dehaze contribution from any stage) without discarding the stored values, so re-enabling
+    /// restores exactly what was there. Asset-level (not per-`Stage`, unlike the four kernel-module
+    /// `isEnabled` switches on `Stage`) because every field they gate — Temp/Tint/Sharpness —
+    /// already lives directly on `PhotoAsset` for the same "not stackable per stage" reason (see
+    /// the doc comment above); "Detail" additionally suppresses Dehaze's contribution from every
+    /// active `Stage` uniformly rather than per-stage, since there's no single "the stage this
+    /// toggle belongs to" once more than one stage is active at once.
+    ///
+    /// `false` by default and whenever the group's own fields are all unset (Temp/Tint for WB;
+    /// Sharpness plus the *current* stage's Dehaze for Detail) — auto-managed by
+    /// `syncModuleEnabled` in the app target's `EditorParameters.swift`, same "no contribution
+    /// until touched" convention as `Stage`'s own module switches. Flips `true` automatically on
+    /// the first adjustment to either field; the `StoplightToggle` in `ColorBalanceBarView` still
+    /// works as a manual bypass once that's happened.
+    public var editWhiteBalanceEnabled: Bool = false
+    public var editDetailEnabled: Bool = false
 
     /// Whether `RawEngine`'s lens-correction module (distortion/vignetting/chromatic aberration,
     /// looked up from `cameraModel`/`lensModel`/`focalLength`/`aperture` above) contributes to this
@@ -69,6 +76,19 @@ public final class PhotoAsset {
     /// full-strength (1.0) correction, same "nil = untouched default" convention as every other
     /// optional edit field.
     public var editLensCorrectionIntensity: Double?
+
+    /// Straighten angle in degrees; `nil` means untouched (0°). Asset-level, not per-`Stage` — see
+    /// `CropParameters`'s doc comment for why crop/straighten is a base param like the lens
+    /// correction group above rather than a stackable/maskable module.
+    public var editCropAngleDegrees: Double?
+    /// The crop rectangle's four normalized (0...1) components, in the coordinate frame of the
+    /// image *after* rotating by `editCropAngleDegrees` — see `CropParameters.rect`'s doc comment.
+    /// All four are `nil` together (never independently) whenever no crop has been set, meaning the
+    /// full rotated frame; `CropEditorOverlay` is the only writer and always sets all four at once.
+    public var editCropRectX: Double?
+    public var editCropRectY: Double?
+    public var editCropRectWidth: Double?
+    public var editCropRectHeight: Double?
 
     /// Owns this photo's `.single` stage (always present, index 0) and any `.custom` stages the
     /// user has added. The shared `.scene` stage lives on `PhotoScene` instead — see `Stage`'s

@@ -115,7 +115,13 @@ public final class Stage {
     /// header in `ColorBalanceBarView`) can still suppress it; see that property's doc comment.
     public var editDehazeAmount: Double?
 
-    public var editFilmicEnabled: Bool = true
+    /// `false` by default and whenever the module empties back out (see `syncModuleEnabled` in the
+    /// app target's `EditorParameters.swift`) — matches every other `nil`-valued field's "no
+    /// contribution until touched" convention, and avoids paying for a `CIColorKernel` pass with
+    /// nothing to do (see this file's doc comment). Flips `true` automatically the moment any of
+    /// this module's fields below get an actual adjustment; the `StoplightToggle` bound to it in
+    /// `EditorSidebarView` still works as a manual bypass once that's happened.
+    public var editFilmicEnabled: Bool = false
     public var editFilmicWhitePointSource: Double?
     public var editFilmicBlackPointSource: Double?
     public var editFilmicContrast: Double?
@@ -126,7 +132,9 @@ public final class Stage {
     public var editFilmicSaturation: Double?
     public var editFilmicBalance: Double?
 
-    public var editColorBalanceEnabled: Bool = true
+    /// `false` by default/when empty, same auto-managed convention as `editFilmicEnabled` above —
+    /// see `syncModuleEnabled` in the app target's `EditorParameters.swift`.
+    public var editColorBalanceEnabled: Bool = false
     /// Sub-group bypass switches, finer-grained than `editColorBalanceEnabled` above — that one
     /// gates the whole `CIColorKernel` pass (returning `nil` from `colorBalanceParameters(for:)`
     /// entirely); these two instead swap specific fields back to
@@ -135,8 +143,10 @@ public final class Stage {
     /// for the two independently-toggleable clusters `ColorBalanceBarView.colorBalanceSection`
     /// splits its fields into: "Color Wheels" (the 12 Y/C/H fields below) and "Balance" (Chroma/
     /// Vibrance here, plus Filmic's Saturation — see `editFilmicSaturation`'s doc comment).
-    public var editColorWheelsEnabled: Bool = true
-    public var editBalanceEnabled: Bool = true
+    /// Both `false` by default/when their own fields are all unset, same auto-managed convention
+    /// as `editFilmicEnabled` above.
+    public var editColorWheelsEnabled: Bool = false
+    public var editBalanceEnabled: Bool = false
     public var editColorBalanceGlobalY: Double?
     public var editColorBalanceGlobalC: Double?
     public var editColorBalanceGlobalH: Double?
@@ -153,7 +163,8 @@ public final class Stage {
     public var editColorBalanceVibrance: Double?
     public var editColorBalanceChromaGlobal: Double?
 
-    public var editRGBCurveEnabled: Bool = true
+    /// `false` by default/when empty, same auto-managed convention as `editFilmicEnabled` above.
+    public var editRGBCurveEnabled: Bool = false
     public var editRGBCurvePoints: [Double]?
     public var editRGBCurvePreserveColors: Bool?
     /// A small, fixed lift applied uniformly to the curve's output (`out = in × (1 − lift) +
@@ -165,7 +176,8 @@ public final class Stage {
     /// itself — see `RGBCurveKernel`'s doc comment for where this applies in the shader.
     public var editRGBCurveBlackLift: Double?
 
-    public var editColorZonesEnabled: Bool = true
+    /// `false` by default/when empty, same auto-managed convention as `editFilmicEnabled` above.
+    public var editColorZonesEnabled: Bool = false
     public var editColorZonesLightnessPoints: [Double]?
     public var editColorZonesChromaPoints: [Double]?
     public var editColorZonesHuePoints: [Double]?
@@ -174,7 +186,10 @@ public final class Stage {
     /// chain — see `RawImageRenderer.applyStage(_:to:)`. `lut3DData`/`lut3DSize` being `nil` means
     /// no LUT is loaded, independent of `editLUT3DEnabled` (which just lets a loaded LUT be
     /// bypassed without discarding it, matching every other module's bypass switch).
-    public var editLUT3DEnabled: Bool = true
+    /// `false` by default/whenever no LUT is loaded, same auto-managed convention as
+    /// `editFilmicEnabled` above — flips `true` the moment a LUT is loaded (see
+    /// `ColorBalanceBarView.applyLUT3DPreset`/`importLUT3DPreset`).
+    public var editLUT3DEnabled: Bool = false
     /// Raw RGBA float32 bytes, red-fastest order — see `LUT3D.data`'s doc comment for the exact
     /// layout. Stored pre-parsed so the original `.cube` file never needs to be re-read.
     public var lut3DData: Data?
