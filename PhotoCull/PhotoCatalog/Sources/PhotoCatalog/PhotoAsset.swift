@@ -57,6 +57,19 @@ public final class PhotoAsset {
     public var editWhiteBalanceEnabled: Bool = true
     public var editDetailEnabled: Bool = true
 
+    /// Whether `RawEngine`'s lens-correction module (distortion/vignetting/chromatic aberration,
+    /// looked up from `cameraModel`/`lensModel`/`focalLength`/`aperture` above) contributes to this
+    /// asset's render. Asset-level, not per-`Stage`, for the same "not stackable" reason as the
+    /// group above — see `RawBaseParameters.lensCorrection`'s doc comment. `true` by default:
+    /// unlike WB/Detail (which start as no-ops until the user drags a slider), a matched lens
+    /// profile should correct the shot from the moment it's imported, matching how every other RAW
+    /// editor treats lens profiles as on-by-default rather than an opt-in effect.
+    public var editLensCorrectionEnabled: Bool = true
+    /// 0...1 "Amount" dial layered on top of the calculated correction; `nil` means the default
+    /// full-strength (1.0) correction, same "nil = untouched default" convention as every other
+    /// optional edit field.
+    public var editLensCorrectionIntensity: Double?
+
     /// Owns this photo's `.single` stage (always present, index 0) and any `.custom` stages the
     /// user has added. The shared `.scene` stage lives on `PhotoScene` instead — see `Stage`'s
     /// doc comment.

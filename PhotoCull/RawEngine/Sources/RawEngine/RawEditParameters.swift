@@ -11,19 +11,26 @@ public struct RawBaseParameters: Equatable, Sendable {
     public var neutralTemperature: Double?
     public var neutralTint: Double?
     public var sharpnessAmount: Double?
+    /// `nil` means "no lens correction" — either no lens matched the shot's EXIF in
+    /// `LensCorrectionDatabase`, or the user turned it off. Lives here, not on `StageParameters`,
+    /// for the same reason as every other field on this struct — see `LensCorrectionParameters`'s
+    /// doc comment.
+    public var lensCorrection: LensCorrectionParameters?
 
     public init(
         exposure: Double? = nil,
         boostAmount: Double? = nil,
         neutralTemperature: Double? = nil,
         neutralTint: Double? = nil,
-        sharpnessAmount: Double? = nil
+        sharpnessAmount: Double? = nil,
+        lensCorrection: LensCorrectionParameters? = nil
     ) {
         self.exposure = exposure
         self.boostAmount = boostAmount
         self.neutralTemperature = neutralTemperature
         self.neutralTint = neutralTint
         self.sharpnessAmount = sharpnessAmount
+        self.lensCorrection = lensCorrection
     }
 
     public static let none = RawBaseParameters()

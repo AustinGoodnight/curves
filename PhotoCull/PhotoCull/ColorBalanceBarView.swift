@@ -80,6 +80,7 @@ struct ColorBalanceBarView: View {
             colorBalanceSection
             colorZonesSection
             detailSection
+            lensCorrectionSection
             lut3DSection
             Spacer(minLength: 0)
         }
@@ -221,6 +222,32 @@ struct ColorBalanceBarView: View {
                     "Dehaze", value: stageBind(\.editDehazeAmount, fallback: 0),
                     range: 0...1, valueText: ""
                 )
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// Undoes the geometric distortion/vignetting/chromatic aberration of whichever lens matched
+    /// this asset's own EXIF (`PhotoAsset.cameraModel`/`lensModel`/`focalLength`/`aperture`) in
+    /// `LensCorrectionDatabase` — see `RawBaseParameters.lensCorrection`'s doc comment for why this
+    /// is asset-level like WB/Detail rather than a `Stage`. No "matched: <lens name>" status label
+    /// here even though it'd be a nice touch — the lookup itself is a ~1500-entry scan, and this
+    /// view's `body` reruns on every fader drag in the editor (see the app target's `CLAUDE.md`), so
+    /// calling it from here would repeat the exact "expensive computed property read in body"
+    /// mistake that file documents at length; the toggle/knob below stay visible unconditionally
+    /// rather than only appearing once a match is confirmed.
+    private var lensCorrectionSection: some View {
+        titledGroup("Lens", enabled: assetBoolBind(\.editLensCorrectionEnabled)) {
+            HStack(spacing: 8) {
+                KnobControl(value: bind(\.editLensCorrectionIntensity, fallback: 1), range: 0...1, resetValue: 1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Amount")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(String(format: "%.0f%%", (asset.editLensCorrectionIntensity ?? 1) * 100))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.primary)
+                }
             }
         }
         .fixedSize(horizontal: true, vertical: false)

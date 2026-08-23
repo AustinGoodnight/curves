@@ -15,8 +15,23 @@ func rawBaseParameters(for asset: PhotoAsset) -> RawBaseParameters {
         exposure: asset.editExposure,
         neutralTemperature: asset.editWhiteBalanceEnabled ? asset.editNeutralTemperature : nil,
         neutralTint: asset.editWhiteBalanceEnabled ? asset.editNeutralTint : nil,
-        sharpnessAmount: asset.editDetailEnabled ? asset.editSharpnessAmount : nil
+        sharpnessAmount: asset.editDetailEnabled ? asset.editSharpnessAmount : nil,
+        lensCorrection: lensCorrectionParameters(for: asset)
     )
+}
+
+/// Looks up `asset`'s matched lens profile (see `LensCorrectionDatabase.profile`) and applies the
+/// user's own enable switch/Amount dial on top. `nil` whenever the switch is off *or* no lens in
+/// the database matched this shot's EXIF closely enough — both cases render exactly as if this
+/// module didn't exist, matching every other module's "nil = no contribution" convention.
+func lensCorrectionParameters(for asset: PhotoAsset) -> LensCorrectionParameters? {
+    guard asset.editLensCorrectionEnabled else { return nil }
+    guard var profile = LensCorrectionDatabase.shared.profile(
+        cameraModel: asset.cameraModel, lensModel: asset.lensModel,
+        focalLength: asset.focalLength, aperture: asset.aperture
+    ) else { return nil }
+    profile.intensity = asset.editLensCorrectionIntensity ?? 1
+    return profile
 }
 
 // MARK: - Stage params (the four stackable `CIColorKernel` modules)
@@ -223,6 +238,7 @@ func stageHasEdits(_ stage: Stage) -> Bool {
 func hasAnyEdits(asset: PhotoAsset, stage: Stage) -> Bool {
     asset.editExposure != nil || asset.editNeutralTemperature != nil || asset.editNeutralTint != nil
         || asset.editSharpnessAmount != nil || !asset.editWhiteBalanceEnabled || !asset.editDetailEnabled
+        || !asset.editLensCorrectionEnabled || asset.editLensCorrectionIntensity != nil
         || stageHasEdits(stage)
 }
 
@@ -292,6 +308,8 @@ func resetAllEdits(asset: PhotoAsset, stage: Stage) {
     asset.editSharpnessAmount = nil
     asset.editWhiteBalanceEnabled = true
     asset.editDetailEnabled = true
+    asset.editLensCorrectionEnabled = true
+    asset.editLensCorrectionIntensity = nil
     resetDehaze(stage)
     resetFilmic(stage)
     resetColorBalance(stage)

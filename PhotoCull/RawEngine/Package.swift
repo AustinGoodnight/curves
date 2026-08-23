@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "RawEngine", targets: ["RawEngine"])
     ],
     targets: [
-        .target(name: "RawEngine"),
+        .target(name: "RawEngine", resources: [.copy("LensCorrection/Resources/db")]),
         .testTarget(name: "RawEngineTests", dependencies: ["RawEngine"])
     ]
 )

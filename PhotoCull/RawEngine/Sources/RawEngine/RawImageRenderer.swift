@@ -122,6 +122,9 @@ public final class RawImageRenderer {
         filter.scaleFactor = longestNative > 0 ? Float(min(1, maxPixelSize / longestNative)) : 1
         filter.isDraftModeEnabled = draft
         guard var output = filter.outputImage else { return nil }
+        if let lensCorrection = baseParams.lensCorrection {
+            output = LensCorrectionKernel.apply(to: output, params: lensCorrection)
+        }
         for stage in stageStack where !stage.isEmpty {
             output = applyStage(stage, to: output)
         }
@@ -139,6 +142,9 @@ public final class RawImageRenderer {
         filter.scaleFactor = 1
         filter.isDraftModeEnabled = false
         guard var output = filter.outputImage else { return nil }
+        if let lensCorrection = baseParams.lensCorrection {
+            output = LensCorrectionKernel.apply(to: output, params: lensCorrection)
+        }
         for stage in stageStack where !stage.isEmpty {
             output = applyStage(stage, to: output)
         }
