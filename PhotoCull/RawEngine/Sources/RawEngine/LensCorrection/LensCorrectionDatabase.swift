@@ -111,6 +111,16 @@ public final class LensCorrectionDatabase: @unchecked Sendable {
         String(s.lowercased().map { $0.isLetter || $0.isNumber ? $0 : " " })
     }
 
+    /// Requires *either* the lens' own maker name to appear in the EXIF string and a moderate
+    /// token overlap, *or* a near-total token overlap on its own. The second path matters more than
+    /// it looks: for third-party lenses (Sigma/Tamron/Tokina), camera bodies routinely report a
+    /// generic, maker-less EXIF lens name (e.g. a Sony body shooting a Tamron zoom reports just "E
+    /// 17-28mm F2.8-2.8", no "Tamron" anywhere) — and the database's own convention for exactly this
+    /// case is to make the *primary*, un-langed `<model>` match that generic EXIF string verbatim,
+    /// with the maker-inclusive name relegated to a `lang="en"` variant. A maker-only gate rejects
+    /// this real, common case outright even at a perfect model-token match; a database-wide check
+    /// confirms no `<model>` string is duplicated verbatim across two different makers, so a
+    /// near-total overlap is safe to trust without maker confirmation.
     private func matchLens(_ exifLensModel: String) -> DBLens? {
         guard !exifLensModel.isEmpty else { return nil }
         let exifNorm = Self.normalize(exifLensModel)
@@ -120,12 +130,13 @@ public final class LensCorrectionDatabase: @unchecked Sendable {
         var best: (lens: DBLens, score: Double)?
         for lens in lenses {
             let makerNorm = Self.normalize(lens.maker)
-            guard !makerNorm.isEmpty, exifNorm.contains(makerNorm) else { continue }
+            let makerConfirmed = !makerNorm.isEmpty && exifNorm.contains(makerNorm)
             for model in lens.models {
                 let modelTokens = Set(Self.normalize(model).split(separator: " ").map(String.init))
                 guard !modelTokens.isEmpty else { continue }
                 let score = Double(exifTokens.intersection(modelTokens).count) / Double(modelTokens.count)
-                if score >= 0.5, score > (best?.score ?? 0) {
+                let qualifies = (makerConfirmed && score >= 0.5) || score >= 0.85
+                if qualifies, score > (best?.score ?? 0) {
                     best = (lens, score)
                 }
             }
