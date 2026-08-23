@@ -1,0 +1,4 @@
+module COpenImageDenoise {
+    header "shim.h"
+    export *
+}

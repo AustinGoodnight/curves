@@ -11,6 +11,11 @@ public struct RawBaseParameters: Equatable, Sendable {
     public var neutralTemperature: Double?
     public var neutralTint: Double?
     public var sharpnessAmount: Double?
+    /// `nil` means "no denoise". Applied immediately after RAW decode, ahead of lens correction —
+    /// denoising before the geometric warp keeps noise statistics spatially uniform going in,
+    /// rather than running OIDN on already-resampled pixels (see `DenoiseFilter`'s doc comment for
+    /// the performance caveat on wiring this into a live-dragging control).
+    public var denoise: DenoiseParameters?
     /// `nil` means "no lens correction" — either no lens matched the shot's EXIF in
     /// `LensCorrectionDatabase`, or the user turned it off. Lives here, not on `StageParameters`,
     /// for the same reason as every other field on this struct — see `LensCorrectionParameters`'s
@@ -27,6 +32,7 @@ public struct RawBaseParameters: Equatable, Sendable {
         neutralTemperature: Double? = nil,
         neutralTint: Double? = nil,
         sharpnessAmount: Double? = nil,
+        denoise: DenoiseParameters? = nil,
         lensCorrection: LensCorrectionParameters? = nil,
         crop: CropParameters? = nil
     ) {
@@ -35,6 +41,7 @@ public struct RawBaseParameters: Equatable, Sendable {
         self.neutralTemperature = neutralTemperature
         self.neutralTint = neutralTint
         self.sharpnessAmount = sharpnessAmount
+        self.denoise = denoise
         self.lensCorrection = lensCorrection
         self.crop = crop
     }

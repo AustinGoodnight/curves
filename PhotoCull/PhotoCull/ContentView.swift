@@ -595,18 +595,32 @@ private final class RecursiveImportOption {
 /// lets that color show straight through the title bar/toolbar region; `backgroundColor` is a
 /// window-level AppKit property, not a per-space toolbar material, so macOS carries it into
 /// fullscreen intact. An `NSViewRepresentable` purely to reach the `NSWindow` a SwiftUI view is
-/// hosted in — it renders nothing itself, `makeNSView`'s `view.window` isn't set until the view is
-/// actually inserted into the hierarchy, hence the deferred `DispatchQueue.main.async`.
+/// hosted in — it renders nothing itself. `view.window` isn't set yet at `makeNSView` time (the
+/// view isn't in the hierarchy), and one deferred `DispatchQueue.main.async` wasn't reliably enough
+/// — `apply()` retries every 0.05s (capped) until the window actually exists, and `updateNSView`
+/// re-applies on every SwiftUI update pass so a window-recreation (fullscreen/Space changes on some
+/// macOS versions do this) can't silently drop the override again.
 private struct WindowBackgroundConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
-        DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            window.titlebarAppearsTransparent = true
-            window.backgroundColor = NSColor(Color.sidebarBackground)
-        }
+        apply(to: view, attempt: 0)
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        apply(to: nsView, attempt: 0)
+    }
+
+    private func apply(to view: NSView, attempt: Int) {
+        guard let window = view.window else {
+            guard attempt < 20 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                apply(to: view, attempt: attempt + 1)
+            }
+            return
+        }
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = NSColor(Color.sidebarBackground)
+    }
 }

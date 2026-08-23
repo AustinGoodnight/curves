@@ -322,6 +322,47 @@ struct FlagFilterControl: View {
     }
 }
 
+/// Pulled out of `ContentView.toolbarContent` on purpose, same reasoning as `RatingFilterControl` —
+/// reads `store.gridMode` as a value. Replaces a stock `Picker(.segmented)` with the same "plain
+/// text, filled pill when selected" tab language `ColorBalanceBarView`'s `colorZonesChannelSwitcher`/
+/// `channelTab` use elsewhere in the app, so the one native-chrome control left in the toolbar
+/// reads as part of the same design system instead of stock macOS segmented-control styling.
+/// Unconditional at its call site — the one control that survives the grid/editor swap — and, since
+/// `ContentView`'s `onChange(of: detailStore.editingAsset)` keeps `gridMode` synced to whether the
+/// editor is open, tapping "Sessions" while editing is what closes the editor now (no separate
+/// "Done" button).
+struct ModeSwitcherControl: View {
+    @Bindable var store: DetailStore
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(GridMode.allCases) { mode in
+                tab(mode)
+            }
+        }
+        .padding(2)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func tab(_ mode: GridMode) -> some View {
+        let isSelected = store.gridMode == mode
+        return Button {
+            store.gridMode = mode
+        } label: {
+            Text(mode.rawValue)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(
+                    isSelected ? Color.accentColor.opacity(0.15) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// Pulled out of `ContentView.toolbarContent` on purpose — it's the only piece of the toolbar
 /// that reads `store.commonSessionForSelection`/`store.scenesInCommonSession`, and those are
 /// mutated a beat *after* `store.selection` itself, via `refreshSelectionDerivedState()` running
