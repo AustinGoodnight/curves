@@ -1,5 +1,6 @@
 import Foundation
 import PhotoCatalog
+import SwiftData
 
 /// A full copy of every user-editable field on a `Stage` (every module's values plus its mask) —
 /// the shared building block for both `EditHistory` (in-memory undo/redo diffing, hence
@@ -171,6 +172,18 @@ struct StageFieldSnapshot: Codable, Equatable {
 }
 
 extension StageFieldSnapshot {
+    /// Applies whichever `Preset` has `isDefault` set (see `StagesSidebarView.saveAsDefaultStage(_:)`)
+    /// onto `stage` — called once per newly-imported photo, on its `.single` stage, from
+    /// `ContentView.performImport`. A silent no-op when no default has ever been saved, or the
+    /// stored snapshot somehow fails to decode; import should never fail or block on this.
+    static func applyDefaultIfAvailable(to stage: Stage, context: ModelContext) {
+        var descriptor = FetchDescriptor<Preset>(predicate: #Predicate { $0.isDefault })
+        descriptor.fetchLimit = 1
+        guard let preset = try? context.fetch(descriptor).first,
+              let snapshot = try? JSONDecoder().decode(StageFieldSnapshot.self, from: preset.snapshotData) else { return }
+        snapshot.apply(to: stage)
+    }
+
     /// Approximates "the combined look of every active stage" as a single flat snapshot, for the
     /// "Save All Stages as Preset" action (`StagesSidebarView.savePreset()`). This is **not** a
     /// mathematically exact flatten of the composited kernel stack — that's not generally possible,

@@ -46,8 +46,8 @@ struct PhotoCatalogTests {
         let first = try importer.importFiles([fileURL], into: context, session: session)
         let second = try importer.importFiles([fileURL], into: context, session: session)
 
-        #expect(first == 1)
-        #expect(second == 0)
+        #expect(first.count == 1)
+        #expect(second.count == 0)
         #expect(try context.fetchCount(FetchDescriptor<PhotoAsset>()) == 1)
     }
 
@@ -73,8 +73,8 @@ struct PhotoCatalogTests {
         let first = try importer.importFiles([fileURL], into: context, session: sessionA)
         let second = try importer.importFiles([fileURL], into: context, session: sessionB)
 
-        #expect(first == 1)
-        #expect(second == 1)
+        #expect(first.count == 1)
+        #expect(second.count == 1)
         #expect(try context.fetchCount(FetchDescriptor<PhotoAsset>()) == 2)
     }
 }

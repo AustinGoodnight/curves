@@ -19,6 +19,12 @@ public final class Preset {
     public var name: String = ""
     public var createdDate: Date = Date()
     public var snapshotData: Data = Data()
+    /// Whether this preset's values are applied automatically to every newly-imported photo's
+    /// `.single` stage — see `StageFieldSnapshot.applyDefaultIfAvailable(to:context:)` in the app
+    /// target, called from `ContentView.performImport`. At most one `Preset` has this set at a
+    /// time; `StagesSidebarView.saveAsDefaultStage(_:)` clears it on every other preset before
+    /// setting it here, rather than this type enforcing uniqueness itself.
+    public var isDefault: Bool = false
 
     public init(name: String, snapshotData: Data) {
         self.id = UUID()

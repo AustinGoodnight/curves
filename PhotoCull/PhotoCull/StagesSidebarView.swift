@@ -333,6 +333,7 @@ struct StagesSidebarView: View {
                 Button("Adjust Gradient…") { onEditGradientMask(stage) }
             }
             Button("Save as Preset…") { beginSavePreset(stage) }
+            Button("Save as Default Stage") { saveAsDefaultStage(stage) }
             // Scene/Single are structural (see `Stage`'s doc comment) — never renamed or deleted.
             if stage.kind.isUserManaged {
                 Button("Rename…") { beginRename(stage) }
@@ -481,6 +482,25 @@ struct StagesSidebarView: View {
         }
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         modelContext.insert(Preset(name: trimmed, snapshotData: data))
+    }
+
+    /// Saves `stage`'s own values as *the* default stage — every newly-imported photo's `.single`
+    /// stage starts pre-populated with these values from then on (see
+    /// `StageFieldSnapshot.applyDefaultIfAvailable(to:context:)`, called from
+    /// `ContentView.performImport`). At most one preset is ever the default: this clears
+    /// `isDefault` on any existing one before creating the new one, rather than updating it in
+    /// place, so the preset list still shows a plain, ordinary history of "Default Stage" saves the
+    /// user can rename/inspect/delete like any other preset — only the newest one stays flagged.
+    private func saveAsDefaultStage(_ stage: Stage) {
+        let previousDefaults = FetchDescriptor<Preset>(predicate: #Predicate { $0.isDefault })
+        for existing in (try? modelContext.fetch(previousDefaults)) ?? [] {
+            existing.isDefault = false
+        }
+        let snapshot = StageFieldSnapshot(capturing: stage)
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        let preset = Preset(name: "Default Stage", snapshotData: data)
+        preset.isDefault = true
+        modelContext.insert(preset)
     }
 
     /// Loads a saved preset onto this photo as a new **custom stage** — never a scene; see

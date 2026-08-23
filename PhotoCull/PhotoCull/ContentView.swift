@@ -64,9 +64,17 @@ struct ContentView: View {
     var body: some View {
         rootView
             .onChange(of: detailStore.selection) { _, _ in detailStore.refreshSelectionDerivedState(allAssets: allAssets, scenes: scenes) }
-            .onChange(of: detailStore.editingAsset) { _, _ in
+            .onChange(of: detailStore.editingAsset) { _, newValue in
                 detailStore.refreshSelectionDerivedState(allAssets: allAssets, scenes: scenes)
                 updateSidebarVisibility()
+                // Keeps the toolbar's Sessions/Edit switcher truthful when the editor opens or
+                // closes through any path *other* than clicking that switcher itself — the
+                // hover-revealed edit button, Return in the culling view, `StagesSidebarView`'s
+                // "Stack" section jumping straight from one photo to another. Safe against
+                // feedback with the `onChange(of: detailStore.gridMode)` handler below: that
+                // handler's own guards (`editingAsset == nil` / `!= nil`) already no-op once
+                // `editingAsset` matches the mode being set here, so this never re-triggers it.
+                detailStore.gridMode = newValue != nil ? .edit : .sessions
             }
             .onChange(of: detailStore.isCullingViewActive) { _, _ in
                 updateSidebarVisibility()
@@ -124,6 +132,7 @@ struct ContentView: View {
                 .toolbarBackground(Color.sidebarBackground, for: .windowToolbar)
                 .toolbarBackground(.visible, for: .windowToolbar)
         }
+        .background(WindowBackgroundConfigurator())
         .background {
             Button("Add Selected to Scene") {
                 guard detailStore.commonSessionForSelection != nil else { return }
@@ -317,10 +326,12 @@ struct ContentView: View {
 
     /// Built once, attached in one place (`detail`'s `.toolbar` above), and shared by both the grid
     /// and the editor now that the editor is swapped in rather than pushed — see the comment on the
-    /// `Group` in `body` for why that's what makes the Mode picker persistent. The icon cluster only
-    /// makes sense for the grid (sort/filter/organize/import all act on `allAssets`), so it's gated
-    /// behind `editingAsset == nil`; the editor gets a single "Done" button in its place. The Mode
-    /// picker itself is unconditional — it's the one control meant to survive the swap.
+    /// `Group` in `body` for why that's what makes the Mode switcher persistent. The icon cluster
+    /// only makes sense for the grid (sort/filter/organize/import all act on `allAssets`), so it's
+    /// gated behind `editingAsset == nil`; the editor shows none of them. The Mode switcher itself
+    /// is unconditional — it's the one control meant to survive the swap, and (now that
+    /// `onChange(of: detailStore.editingAsset)` above keeps it in sync) it's also how the editor
+    /// closes: clicking "Sessions" while editing is what used to be a separate "Done" button.
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         if detailStore.editingAsset == nil {
@@ -378,10 +389,6 @@ struct ContentView: View {
                 .toggleStyle(.button)
                 .help("Culling View — review and grade one photo at a time")
             }
-        } else {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Done") { closeEditor() }
-            }
         }
         // NSToolbar lays items out left-to-right with no automatic trailing alignment on macOS —
         // `.confirmationAction` was tried first and rendered in the same leading cluster as
@@ -391,13 +398,7 @@ struct ContentView: View {
             Spacer()
         }
         ToolbarItem(placement: .primaryAction) {
-            Picker("Mode", selection: $detailStore.gridMode) {
-                ForEach(GridMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .fixedSize()
+            ModeSwitcherControl(store: detailStore)
         }
     }
 
@@ -430,7 +431,15 @@ struct ContentView: View {
     private func performImport(files: [URL], session: Session) {
         let importer = LibraryImporter()
         do {
-            let count = try importer.importFiles(files, into: modelContext, session: session)
+            let imported = try importer.importFiles(files, into: modelContext, session: session)
+            // Applies the "Default Stage" preset (if any) to each newly-imported photo's own
+            // `.single` stage — see `StageFieldSnapshot.applyDefaultIfAvailable(to:context:)`. Not
+            // done inside `LibraryImporter` itself: that lives in the PhotoCatalog package, which
+            // has no visibility into `Preset`/`StageFieldSnapshot` (both app-target types).
+            for asset in imported {
+                StageFieldSnapshot.applyDefaultIfAvailable(to: asset.singleStage, context: modelContext)
+            }
+            let count = imported.count
             importStatus = "Imported \(count) new file\(count == 1 ? "" : "s") (\(files.count) RAW file\(files.count == 1 ? "" : "s") found)."
             refreshFilteredAssets()
         } catch {
@@ -576,4 +585,28 @@ struct ContentView: View {
 
 private final class RecursiveImportOption {
     var recursive = true
+}
+
+/// Sets the `NSWindow`'s own `backgroundColor` directly, rather than relying solely on
+/// `.toolbarBackground(_:for:)` — that modifier's custom tint doesn't reliably survive the
+/// transition into macOS fullscreen (a distinct window/space from the windowed one), which is what
+/// let the toolbar fall back to the system's default dark-mode window background — a lighter
+/// charcoal grey — instead of this app's own much darker palette there. `titlebarAppearsTransparent`
+/// lets that color show straight through the title bar/toolbar region; `backgroundColor` is a
+/// window-level AppKit property, not a per-space toolbar material, so macOS carries it into
+/// fullscreen intact. An `NSViewRepresentable` purely to reach the `NSWindow` a SwiftUI view is
+/// hosted in — it renders nothing itself, `makeNSView`'s `view.window` isn't set until the view is
+/// actually inserted into the hierarchy, hence the deferred `DispatchQueue.main.async`.
+private struct WindowBackgroundConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.titlebarAppearsTransparent = true
+            window.backgroundColor = NSColor(Color.sidebarBackground)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

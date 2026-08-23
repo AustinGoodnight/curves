@@ -31,14 +31,29 @@ struct PresetBrowserView: View {
                     Button {
                         onApply(preset)
                     } label: {
-                        Text(preset.name)
-                            .lineLimit(1)
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
+                        HStack(spacing: 4) {
+                            if preset.isDefault {
+                                Image(systemName: "star.fill")
+                                    .foregroundStyle(.secondary)
+                                    .imageScale(.small)
+                            }
+                            Text(preset.name)
+                                .lineLimit(1)
+                                .foregroundStyle(.primary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
+                        // Every new photo's `.single` stage starts pre-populated from whichever
+                        // preset has this flag — see `StageFieldSnapshot.applyDefaultIfAvailable(to:
+                        // context:)`. Toggling it here (rather than only via `StagesSidebarView`'s
+                        // "Save as Default Stage") is what lets the user pick an *existing* preset
+                        // as the default, or turn the current one off without replacing it.
+                        Button(preset.isDefault ? "Remove as Default Stage" : "Set as Default Stage") {
+                            toggleDefault(preset)
+                        }
                         Button("Rename…") { beginRename(preset) }
                         Button("Delete", role: .destructive) { modelContext.delete(preset) }
                     }
@@ -61,5 +76,15 @@ struct PresetBrowserView: View {
     private func beginRename(_ preset: Preset) {
         renamingPreset = preset
         renameText = preset.name
+    }
+
+    /// At most one preset is ever the default — clears the flag on every other one first, matching
+    /// `StagesSidebarView.saveAsDefaultStage(_:)`'s own invariant.
+    private func toggleDefault(_ preset: Preset) {
+        let turningOn = !preset.isDefault
+        for other in presets where other.isDefault {
+            other.isDefault = false
+        }
+        preset.isDefault = turningOn
     }
 }
