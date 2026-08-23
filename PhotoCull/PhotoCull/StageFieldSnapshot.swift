@@ -36,6 +36,7 @@ struct StageFieldSnapshot: Codable, Equatable {
     var editRGBCurveEnabled: Bool
     var editRGBCurvePoints: [Double]?
     var editRGBCurvePreserveColors: Bool?
+    var editRGBCurveBlackLift: Double?
 
     var editColorZonesEnabled: Bool
     var editColorZonesLightnessPoints: [Double]?
@@ -49,6 +50,14 @@ struct StageFieldSnapshot: Codable, Equatable {
     var lut3DIntensity: Double?
 
     var maskData: Data?
+
+    var gradientStartX: Double?
+    var gradientStartY: Double?
+    var gradientEndX: Double?
+    var gradientEndY: Double?
+    var gradientRadius: Double?
+    var gradientFeather: Double?
+    var gradientInverted: Bool?
 
     init(capturing stage: Stage) {
         editDehazeAmount = stage.editDehazeAmount
@@ -81,6 +90,7 @@ struct StageFieldSnapshot: Codable, Equatable {
         editRGBCurveEnabled = stage.editRGBCurveEnabled
         editRGBCurvePoints = stage.editRGBCurvePoints
         editRGBCurvePreserveColors = stage.editRGBCurvePreserveColors
+        editRGBCurveBlackLift = stage.editRGBCurveBlackLift
 
         editColorZonesEnabled = stage.editColorZonesEnabled
         editColorZonesLightnessPoints = stage.editColorZonesLightnessPoints
@@ -94,6 +104,14 @@ struct StageFieldSnapshot: Codable, Equatable {
         lut3DIntensity = stage.lut3DIntensity
 
         maskData = stage.maskData
+
+        gradientStartX = stage.gradientStartX
+        gradientStartY = stage.gradientStartY
+        gradientEndX = stage.gradientEndX
+        gradientEndY = stage.gradientEndY
+        gradientRadius = stage.gradientRadius
+        gradientFeather = stage.gradientFeather
+        gradientInverted = stage.gradientInverted
     }
 
     func apply(to stage: Stage) {
@@ -127,6 +145,7 @@ struct StageFieldSnapshot: Codable, Equatable {
         stage.editRGBCurveEnabled = editRGBCurveEnabled
         stage.editRGBCurvePoints = editRGBCurvePoints
         stage.editRGBCurvePreserveColors = editRGBCurvePreserveColors
+        stage.editRGBCurveBlackLift = editRGBCurveBlackLift
 
         stage.editColorZonesEnabled = editColorZonesEnabled
         stage.editColorZonesLightnessPoints = editColorZonesLightnessPoints
@@ -140,6 +159,14 @@ struct StageFieldSnapshot: Codable, Equatable {
         stage.lut3DIntensity = lut3DIntensity
 
         stage.maskData = maskData
+
+        stage.gradientStartX = gradientStartX
+        stage.gradientStartY = gradientStartY
+        stage.gradientEndX = gradientEndX
+        stage.gradientEndY = gradientEndY
+        stage.gradientRadius = gradientRadius
+        stage.gradientFeather = gradientFeather
+        stage.gradientInverted = gradientInverted
     }
 }
 
@@ -153,9 +180,10 @@ extension StageFieldSnapshot {
     /// that actually set a value win. The per-module "Enabled" bypass flags are ANDed instead of
     /// overridden, so a module any stage in the stack explicitly turned off stays off in the merged
     /// preset, rather than a later, untouched stage's default `true` silently reviving it.
-    /// `maskData` is dropped entirely — masks are spatial and stage-specific, so carrying one over
-    /// from an arbitrary stage in the merge would misapply it; a merged preset always covers the
-    /// whole image. `stages` must be non-empty (callers gate the triggering button on that).
+    /// `maskData` (and the gradient geometry that can accompany it) is dropped entirely — masks are
+    /// spatial and stage-specific, so carrying one over from an arbitrary stage in the merge would
+    /// misapply it; a merged preset always covers the whole image. `stages` must be non-empty
+    /// (callers gate the triggering button on that).
     init(mergingActiveStages stages: [Stage]) {
         precondition(!stages.isEmpty, "mergingActiveStages requires at least one stage")
         var result = StageFieldSnapshot(capturing: stages[0])
@@ -191,6 +219,7 @@ extension StageFieldSnapshot {
             result.editRGBCurveEnabled = result.editRGBCurveEnabled && next.editRGBCurveEnabled
             result.editRGBCurvePoints = next.editRGBCurvePoints ?? result.editRGBCurvePoints
             result.editRGBCurvePreserveColors = next.editRGBCurvePreserveColors ?? result.editRGBCurvePreserveColors
+            result.editRGBCurveBlackLift = next.editRGBCurveBlackLift ?? result.editRGBCurveBlackLift
 
             result.editColorZonesEnabled = result.editColorZonesEnabled && next.editColorZonesEnabled
             result.editColorZonesLightnessPoints = next.editColorZonesLightnessPoints ?? result.editColorZonesLightnessPoints
@@ -204,6 +233,13 @@ extension StageFieldSnapshot {
             result.lut3DIntensity = next.lut3DIntensity ?? result.lut3DIntensity
         }
         result.maskData = nil
+        result.gradientStartX = nil
+        result.gradientStartY = nil
+        result.gradientEndX = nil
+        result.gradientEndY = nil
+        result.gradientRadius = nil
+        result.gradientFeather = nil
+        result.gradientInverted = nil
         self = result
     }
 
@@ -233,7 +269,7 @@ extension StageFieldSnapshot {
             changed.insert("Color Balance RGB")
         }
         if editRGBCurveEnabled != other.editRGBCurveEnabled || editRGBCurvePoints != other.editRGBCurvePoints
-            || editRGBCurvePreserveColors != other.editRGBCurvePreserveColors {
+            || editRGBCurvePreserveColors != other.editRGBCurvePreserveColors || editRGBCurveBlackLift != other.editRGBCurveBlackLift {
             changed.insert("RGB Curve")
         }
         if editColorZonesEnabled != other.editColorZonesEnabled || editColorZonesLightnessPoints != other.editColorZonesLightnessPoints
@@ -244,7 +280,9 @@ extension StageFieldSnapshot {
             || lut3DTitle != other.lut3DTitle || lut3DIntensity != other.lut3DIntensity {
             changed.insert("Film Simulation")
         }
-        if maskData != other.maskData {
+        if maskData != other.maskData || gradientStartX != other.gradientStartX || gradientStartY != other.gradientStartY
+            || gradientEndX != other.gradientEndX || gradientEndY != other.gradientEndY || gradientRadius != other.gradientRadius
+            || gradientFeather != other.gradientFeather || gradientInverted != other.gradientInverted {
             changed.insert("Mask")
         }
         return changed

@@ -31,6 +31,10 @@ struct StagesSidebarView: View {
     /// both right after creating a new `.assistedMask` stage and from an existing one's "Refine
     /// Mask…" context menu item.
     var onEditMask: (Stage) -> Void
+    /// Enters `GradientMaskEditorOverlay` (`EditorView.gradientEditingStage`) for the given
+    /// `.linearGradientMask`/`.radialGradientMask` stage — same two call sites as `onEditMask`,
+    /// just routed to the gradient-handle editor instead of the brush one.
+    var onEditGradientMask: (Stage) -> Void
     @Environment(\.modelContext) private var modelContext
 
     @State private var renamingStage: Stage?
@@ -107,6 +111,20 @@ struct StagesSidebarView: View {
                 addAssistedMaskStage()
             } label: {
                 Label("Add Assisted Mask Stage", systemImage: "wand.and.stars")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            Button {
+                addGradientMaskStage(kind: .linearGradientMask)
+            } label: {
+                Label("Add Linear Gradient Mask", systemImage: "rectangle.righthalf.filled")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            Button {
+                addGradientMaskStage(kind: .radialGradientMask)
+            } label: {
+                Label("Add Radial Gradient Mask", systemImage: "target")
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -273,8 +291,8 @@ struct StagesSidebarView: View {
                 selectedStage = stage
             } label: {
                 HStack(spacing: 4) {
-                    if stage.kind == .assistedMask {
-                        Image(systemName: "wand.and.stars")
+                    if let icon = stage.kind.rowIcon {
+                        Image(systemName: icon)
                             .foregroundStyle(.secondary)
                             .imageScale(.small)
                     }
@@ -299,9 +317,12 @@ struct StagesSidebarView: View {
             if stage.kind == .assistedMask {
                 Button("Refine Mask…") { onEditMask(stage) }
             }
+            if stage.kind == .linearGradientMask || stage.kind == .radialGradientMask {
+                Button("Adjust Gradient…") { onEditGradientMask(stage) }
+            }
             Button("Save as Preset…") { beginSavePreset(stage) }
             // Scene/Single are structural (see `Stage`'s doc comment) — never renamed or deleted.
-            if stage.kind == .custom || stage.kind == .assistedMask {
+            if stage.kind.isUserManaged {
                 Button("Rename…") { beginRename(stage) }
                 Button("Delete", role: .destructive) { delete(stage) }
             }
@@ -398,6 +419,26 @@ struct StagesSidebarView: View {
         selectedStage = stage
         refreshAndRender()
         onEditMask(stage)
+    }
+
+    /// Same blank-slate/ownership rules as `addCustomStage()`/`addAssistedMaskStage()`, for either
+    /// gradient kind — immediately hands the new stage to `onEditGradientMask` so
+    /// `GradientMaskEditorOverlay` opens right away and bakes its own default geometry into
+    /// `maskData` before the user has touched anything, same as a fresh gradient tool in any other
+    /// photo editor already showing a live (if default-positioned) gradient.
+    private func addGradientMaskStage(kind: StageKind) {
+        let nextIndex = (asset.customStages.map(\.sortIndex).max() ?? -1) + 1
+        let baseName = kind == .linearGradientMask ? "Linear Gradient" : "Radial Gradient"
+        let stage: Stage
+        if let stack = asset.stack {
+            stage = Stage(kind: kind, name: "\(baseName) \(nextIndex + 1)", stack: stack, sortIndex: nextIndex)
+        } else {
+            stage = Stage(kind: kind, name: "\(baseName) \(nextIndex + 1)", asset: asset, sortIndex: nextIndex)
+        }
+        modelContext.insert(stage)
+        selectedStage = stage
+        refreshAndRender()
+        onEditGradientMask(stage)
     }
 
     private func beginRename(_ stage: Stage) {

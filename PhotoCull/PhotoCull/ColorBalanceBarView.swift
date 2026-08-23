@@ -418,6 +418,7 @@ struct ColorBalanceBarView: View {
                 showHeader: false,
                 topCornersSquared: false,
                 lineColor: .white,
+                showGrid: true,
                 onPointsChange: { newPoints in
                     let keyPath = colorZonesActiveKeyPath
                     stage[keyPath: keyPath] = newPoints.flatMap { [$0.x, $0.y] }
@@ -533,10 +534,19 @@ struct ColorBalanceBarView: View {
                     onImport: { url in importLUT3DPreset(from: url) }
                 )
                 if stage.lut3DData != nil {
-                    slider(
-                        "Intensity", value: stageBind(\.lut3DIntensity, fallback: 1),
-                        range: 0...1, resetValue: 1
-                    )
+                    // A knob instead of `slider(...)`'s usual horizontal bar — an experiment,
+                    // scoped to just this one control for now (see `KnobControl`'s doc comment).
+                    HStack(spacing: 8) {
+                        KnobControl(value: stageBind(\.lut3DIntensity, fallback: 1), range: 0...1, resetValue: 1)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Intensity")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(String(format: "%.0f%%", (stage.lut3DIntensity ?? 1) * 100))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.primary)
+                        }
+                    }
                 }
             }
             .alignmentGuide(.contentTop) { d in d[.top] + perControlTitleHeight }

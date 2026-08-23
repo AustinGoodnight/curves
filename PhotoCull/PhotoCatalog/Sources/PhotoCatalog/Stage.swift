@@ -1,21 +1,45 @@
 import Foundation
 import SwiftData
 
-/// Which of the four roles a `Stage` plays. `.single` and `.scene` are structural — every
+/// Which of the six roles a `Stage` plays. `.single` and `.scene` are structural — every
 /// `PhotoAsset`/`PhotoScene` has exactly one, created alongside its owner and never deleted or
-/// renamed. `.custom` and `.assistedMask` stages are freely added/removed/renamed by the user and
-/// share one `sortIndex` sequence (see `PhotoAsset.customStages`'s doc comment) — `.assistedMask`
-/// differs from `.custom` only in that it's created with `maskData` populated via the assisted
-/// mask editor (rough brush strokes refined to the photo's own edges by a guided filter — see
-/// `GuidedMaskRefiner` in the app target) rather than starting as a whole-image blank slate. A
-/// stack doesn't get its own kind — see `PhotoStack.stages`'s doc comment for why a stacked
-/// photo's `.single`/`.custom`/`.assistedMask` stages are the *same kind*, just owned by the stack
-/// instead of the asset.
+/// renamed. `.custom`, `.assistedMask`, `.linearGradientMask`, and `.radialGradientMask` stages are
+/// freely added/removed/renamed by the user and share one `sortIndex` sequence (see
+/// `PhotoAsset.customStages`'s doc comment). The three mask kinds all differ from `.custom` only in
+/// how `maskData` gets populated: `.assistedMask` via the assisted mask editor (rough brush strokes
+/// refined to the photo's own edges by a guided filter — see `GuidedMaskRefiner` in the app
+/// target); `.linearGradientMask`/`.radialGradientMask` via `GradientMaskEditorOverlay`, which also
+/// keeps the gradient's geometry on `gradientStartX`/etc. so it stays live-editable ("Adjust
+/// Gradient…") instead of only being a baked raster like the other two mask kinds. A stack doesn't
+/// get its own kind — see `PhotoStack.stages`'s doc comment for why a stacked photo's `.single`/
+/// `.custom`/mask stages are the *same kind*, just owned by the stack instead of the asset.
 public enum StageKind: Int, Codable, Sendable {
     case single = 0
     case scene = 1
     case custom = 2
     case assistedMask = 3
+    case linearGradientMask = 4
+    case radialGradientMask = 5
+
+    /// Whether this kind belongs to the user-managed `.custom`-style sequence (freely added,
+    /// renamed, deleted, ordered by `sortIndex`) rather than being structural like `.single`/
+    /// `.scene`. Centralizes the membership check `PhotoAsset.customStages`/`PhotoStack
+    /// .customStages` and `StagesSidebarView`'s rename/delete gating all need, so a future new kind
+    /// only has to be added here once instead of at every call site independently.
+    public var isUserManaged: Bool {
+        self != .single && self != .scene
+    }
+
+    /// SF Symbol shown as a small prefix before this kind's name in `StagesSidebarView`'s stage
+    /// list — `nil` for kinds that need no visual distinction from a plain `.custom` stage.
+    public var rowIcon: String? {
+        switch self {
+        case .assistedMask: return "wand.and.stars"
+        case .linearGradientMask: return "rectangle.righthalf.filled"
+        case .radialGradientMask: return "target"
+        case .single, .scene, .custom: return nil
+        }
+    }
 }
 
 /// One independently-editable, non-destructive set of tone/color adjustments. A photo's rendered
@@ -61,6 +85,29 @@ public final class Stage {
     /// mechanism. Stored at a fixed working resolution independent of render size — see
     /// `RawImageRenderer.applyStage(_:to:)` for how it's rescaled per render.
     public var maskData: Data?
+
+    /// Gradient geometry for `.linearGradientMask`/`.radialGradientMask` stages, `nil` for every
+    /// other kind. All in normalized 0–1 image-space coordinates/lengths (fraction of image width,
+    /// matching `x`'s own normalization, so a circle stays a true circle regardless of the photo's
+    /// aspect ratio) rather than pixel coordinates, so they stay meaningful independent of
+    /// `maskData`'s own fixed working resolution. Kept alongside the baked `maskData` raster
+    /// (`GradientMaskEditorOverlay.finish()` writes both together) purely so reopening the editor
+    /// ("Adjust Gradient…") can restore the exact handle positions instead of only offering a blank
+    /// slate the way `.assistedMask`'s "Refine Mask…" does — the render pipeline itself only ever
+    /// reads `maskData`, never these. `gradientStartX`/`Y` doubles as the linear gradient's start
+    /// handle (full effect) or the radial gradient's center; `gradientEndX`/`Y` is the linear
+    /// gradient's end handle (no effect) and is unused by `.radialGradientMask`, which uses
+    /// `gradientRadius`/`gradientFeather` instead.
+    public var gradientStartX: Double?
+    public var gradientStartY: Double?
+    public var gradientEndX: Double?
+    public var gradientEndY: Double?
+    /// Radial only: normalized radius (from center) of full effect, before the feather falloff.
+    public var gradientRadius: Double?
+    /// Radial only: normalized width of the soft falloff band beyond `gradientRadius`.
+    public var gradientFeather: Double?
+    /// Both kinds: flips which side of the gradient is fully affected vs. fully protected.
+    public var gradientInverted: Bool?
 
     /// `nil` means no haze removal — see `DehazeKernel`/`DehazeParameters` in `RawEngine`. No
     /// separate `editDehazeEnabled` switch of its *own* — `nil`/0 is already a true no-op — but its
@@ -109,6 +156,14 @@ public final class Stage {
     public var editRGBCurveEnabled: Bool = true
     public var editRGBCurvePoints: [Double]?
     public var editRGBCurvePreserveColors: Bool?
+    /// A small, fixed lift applied uniformly to the curve's output (`out = in × (1 − lift) +
+    /// lift`, the standard "lift" term from lift/gamma/gain color grading) — raises the black
+    /// point while keeping the white point pinned at 1, independent of `editRGBCurvePoints`'s own
+    /// node positions. A separate, precise numeric control rather than dragging the curve graph's
+    /// bottom-left endpoint, for the same "coarse graph vs. exact number" reason Filmic's sliders
+    /// exist alongside a graph-free module. Gated by `editRGBCurveEnabled`, same as the curve
+    /// itself — see `RGBCurveKernel`'s doc comment for where this applies in the shader.
+    public var editRGBCurveBlackLift: Double?
 
     public var editColorZonesEnabled: Bool = true
     public var editColorZonesLightnessPoints: [Double]?

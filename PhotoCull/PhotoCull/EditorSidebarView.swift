@@ -24,9 +24,10 @@ struct EditorSidebarView: View {
     let coordinator: EditorRenderCoordinator
     let history: EditHistory
 
-    /// Purely local UI state, not persisted: reopening the editor always starts collapsed, since
-    /// "most of the time I leave it at default" was the whole reason for hiding it.
-    @State private var isFilmicExpanded = false
+    /// Purely local UI state, not persisted: reopening the editor always starts closed, since
+    /// "most of the time I leave it at default" was the whole reason for hiding these behind a
+    /// dropdown in the first place.
+    @State private var isFilmicPopoverPresented = false
 
     /// The RGB Curve graph's height, proportional to the sidebar's current width so it grows/
     /// shrinks as the split is dragged instead of staying a fixed 260pt regardless of available
@@ -54,27 +55,22 @@ struct EditorSidebarView: View {
     private func sidebarContent(width: CGFloat) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                // Whole-image readouts, not editable controls — no `section()` reset/enabled
-                // chrome, just a plain caption label each, matching how the per-module histogram
+                // Whole-image readout, not an editable control — no `section()` reset/enabled
+                // chrome, just a plain caption label, matching how the per-module histogram
                 // backdrops (`CurveEditorControl`'s) are captioned nowhere at all since they sit
-                // behind a graph that's already self-explanatory; these need the label since nothing
-                // else on screen explains what they're showing.
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Histogram")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        RGBHistogramView(data: coordinator.rgbHistogram, height: 160)
-                    }
-                    .frame(maxWidth: .infinity)
-                    VStack(spacing: 8) {
-                        Text("Color Graph")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        ColorDensityWheel(density: coordinator.colorDensity, diameter: min(160, width * 0.34))
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
+                // behind a graph that's already self-explanatory; this needs the label since nothing
+                // else on screen explains what it's showing.
+                //
+                // Color Graph (`ColorDensityWheel`) used to share this row — pulled out for now
+                // (not deleted: `ColorDensityWheel.swift` is untouched, still a working, reusable
+                // component) so Histogram can take the full row width and grow, instead of the two
+                // splitting it.
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Histogram")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    RGBHistogramView(data: coordinator.rgbHistogram, height: 240)
+                        .frame(maxWidth: .infinity)
                 }
                 // Exposure (native `CIRAWFilter` input, asset-level) and Contrast (a Color
                 // Balance RGB field, per-stage) share one section despite coming from different
@@ -86,52 +82,79 @@ struct EditorSidebarView: View {
                 section("Exposure") {
                     slider(
                         "Exposure", value: bind(\.editExposure, fallback: coordinator.renderer.defaultExposure),
-                        range: -4...4, resetValue: coordinator.renderer.defaultExposure
+                        range: -4...4, resetValue: coordinator.renderer.defaultExposure,
+                        ticks: [-4, -3, -2, -1, 0, 1, 2, 3, 4]
                     )
-                    slider("Contrast", value: stageBind(\.editColorBalanceContrast, fallback: 0), range: -0.5...0.5)
+                    slider(
+                        "Contrast", value: stageBind(\.editColorBalanceContrast, fallback: 0), range: -0.5...0.5,
+                        ticks: [-0.5, -0.25, 0, 0.25, 0.5]
+                    )
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
-                        sectionTitle("Filmic RGB", enabled: stageBoolBind(\.editFilmicEnabled))
-                        resetButton(disabled: !filmicHasEdits(stage), action: {
-                            resetFilmic(stage)
-                            scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
-                        })
-                        Spacer()
-                        Button {
-                            isFilmicExpanded.toggle()
-                        } label: {
-                            Text("Edit")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Color.accentColor)
-                        StoplightToggle(isOn: stageBoolBind(\.editFilmicEnabled))
+                // The big "Filmic" area toggles the module on/off (unchanged); the chevron is a
+                // second, separate tap target sharing the same button's fill/text-color state
+                // that opens a popover anchored to the button instead of always showing the five
+                // sub-sliders inline — same "hide it, most of the time I leave it at default"
+                // reasoning the old "Edit" link had, just via a dropdown now instead of expanding
+                // this view's own layout.
+                HStack(spacing: 1) {
+                    Button {
+                        stage.editFilmicEnabled.toggle()
+                        scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                    } label: {
+                        Text("Filmic")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
                     }
-                    if isFilmicExpanded {
+                    .buttonStyle(.plain)
+
+                    Button {
+                        isFilmicPopoverPresented = true
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $isFilmicPopoverPresented) {
                         let d = FilmicRGBParameters.darktableDefault
-                        slider(
-                            "White EV", value: stageBind(\.editFilmicWhitePointSource, fallback: d.whitePointSource),
-                            range: 2...8, resetValue: d.whitePointSource
-                        )
-                        slider(
-                            "Black EV", value: stageBind(\.editFilmicBlackPointSource, fallback: d.blackPointSource),
-                            range: -14 ... -2, resetValue: d.blackPointSource
-                        )
-                        slider(
-                            "Contrast", value: stageBind(\.editFilmicContrast, fallback: d.contrast),
-                            range: 0.5...2, resetValue: d.contrast
-                        )
-                        slider(
-                            "Latitude", value: stageBind(\.editFilmicLatitude, fallback: d.latitude),
-                            range: 0.01...80, resetValue: d.latitude
-                        )
-                        slider(
-                            "Balance", value: stageBind(\.editFilmicBalance, fallback: d.balance),
-                            range: -50...50, resetValue: d.balance
-                        )
+                        VStack(alignment: .leading, spacing: 10) {
+                            slider(
+                                "White EV", value: stageBind(\.editFilmicWhitePointSource, fallback: d.whitePointSource),
+                                range: 2...8, resetValue: d.whitePointSource,
+                                ticks: [2, 3, 4, 5, 6, 7, 8]
+                            )
+                            slider(
+                                "Black EV", value: stageBind(\.editFilmicBlackPointSource, fallback: d.blackPointSource),
+                                range: -14 ... -2, resetValue: d.blackPointSource,
+                                ticks: [-14, -12, -10, -8, -6, -4, -2]
+                            )
+                            slider(
+                                "Contrast", value: stageBind(\.editFilmicContrast, fallback: d.contrast),
+                                range: 0.5...2, resetValue: d.contrast,
+                                ticks: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
+                            )
+                            slider(
+                                "Latitude", value: stageBind(\.editFilmicLatitude, fallback: d.latitude),
+                                range: 0.01...80, resetValue: d.latitude,
+                                ticks: [0, 20, 40, 60, 80]
+                            )
+                            slider(
+                                "Balance", value: stageBind(\.editFilmicBalance, fallback: d.balance),
+                                range: -50...50, resetValue: d.balance,
+                                ticks: [-50, -25, 0, 25, 50]
+                            )
+                        }
+                        .padding()
+                        .frame(width: 260)
                     }
                 }
+                .foregroundStyle(stage.editFilmicEnabled ? Color.accentColor : Color.secondary)
+                .background(
+                    stage.editFilmicEnabled ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.06),
+                    in: RoundedRectangle(cornerRadius: 8)
+                )
                 VStack(alignment: .leading, spacing: 10) {
                     // Three independent regions, same technique as `ColorBalanceBarView.colorZonesSection`'s
                     // own header — "Curve" + reset pinned leading, "Preserve Color" truly centered on the
@@ -171,12 +194,20 @@ struct EditorSidebarView: View {
                         points: rgbCurvePoints(for: stage), height: rgbCurveHeight(for: width),
                         histogram: coordinator.luminanceHistogram,
                         showHeader: false,
+                        showEndpointControls: true,
                         onPointsChange: { newPoints in
                             stage.editRGBCurvePoints = newPoints.flatMap { [$0.x, $0.y] }
                             scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                         }
                     )
                     .equatable()
+                    // A precise numeric nudge, separate from dragging the graph's own bottom-left
+                    // endpoint — small range ("slightly") since this is meant for a fine trim, not
+                    // a replacement for Filmic's much wider Black EV control.
+                    slider(
+                        "Black Lift Precise", value: stageBind(\.editRGBCurveBlackLift, fallback: 0),
+                        range: 0...0.15, resetValue: 0, ticks: [0, 0.05, 0.1, 0.15]
+                    )
                 }
                 EditorFooterActions(asset: asset, stage: stage, activeStages: activeStages, coordinator: coordinator, history: history)
             }

@@ -21,10 +21,15 @@ public struct RGBCurveParameters: Equatable, Sendable {
     /// hue/chroma), vs. applying the curve to each channel independently (can shift color, but
     /// is more predictable for deliberate channel-level grading).
     public var preserveColors: Bool
+    /// Uniform lift applied after the curve (`out = in × (1 − blackLift) + blackLift`) — not part
+    /// of darktable's `rgbcurve` module, added so the UI can offer a small precise black-point
+    /// nudge separate from dragging the curve graph's own endpoint. 0 is a no-op.
+    public var blackLift: Double
 
-    public init(points: [SIMD2<Double>] = RGBCurveParameters.identityPoints, preserveColors: Bool = true) {
+    public init(points: [SIMD2<Double>] = RGBCurveParameters.identityPoints, preserveColors: Bool = true, blackLift: Double = 0) {
         self.points = points
         self.preserveColors = preserveColors
+        self.blackLift = blackLift
     }
 
     /// The 2-node identity line: `f(x) = x`, matching darktable's default (`curve_num_nodes = 2`

@@ -66,10 +66,12 @@ func section<Content: View>(
 /// `resetValue` is what double-clicking the slider sets it to — pass the same value used as the
 /// binding's own fallback wherever that fallback isn't 0 (`MinimalSlider`'s default), e.g. a
 /// camera-dependent default like `coordinator.renderer.defaultExposure`.
-func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, resetValue: Double? = nil) -> some View {
+func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, resetValue: Double? = nil, ticks: [Double] = []) -> some View {
     VStack(alignment: .leading, spacing: 4) {
         HStack {
             Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Spacer()
             Text(value.wrappedValue, format: .number.precision(.fractionLength(2)))
                 .font(.caption)
@@ -78,7 +80,7 @@ func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>,
                 .padding(.vertical, 2)
                 .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
         }
-        MinimalSlider(value: value, range: range, resetValue: resetValue)
+        MinimalSlider(value: value, range: range, resetValue: resetValue, ticks: ticks)
     }
 }
 

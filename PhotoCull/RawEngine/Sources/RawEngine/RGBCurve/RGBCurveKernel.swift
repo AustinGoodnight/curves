@@ -6,6 +6,8 @@ import Foundation
 /// `RGBCurveKernelTests` for a numerical cross-check) either per-channel or as a
 /// luminance-preserving ratio, matching darktable's `process()` in `rgbcurve.c`. See
 /// `RGBCurveParameters` for the scope note on which of darktable's modes this corresponds to.
+/// After the curve, `RGBCurveParameters.blackLift` (not part of darktable's module) applies a
+/// uniform lift/gamma/gain-style lift to the result — see the kernel source's final line.
 public enum RGBCurveKernel {
     /// Up to 8 control points (7 segments), packed as pairs of `vec4` so every argument is a
     /// plain scalar/vector Core Image can marshal — no dynamic array parameters, matching
@@ -72,7 +74,8 @@ public enum RGBCurveKernel {
         vec4 nodeY0, vec4 nodeY1,
         vec4 nodeM0, vec4 nodeM1,
         float nodeCount,
-        float preserveColors)
+        float preserveColors,
+        float blackLift)
     {
         vec4 pix = sample(image, samplerCoord(image));
         vec3 c = pix.rgb;
@@ -91,6 +94,9 @@ public enum RGBCurveKernel {
             outc.y = curveEval(c.y, nodeX0, nodeX1, nodeY0, nodeY1, nodeM0, nodeM1, nodeCount);
             outc.z = curveEval(c.z, nodeX0, nodeX1, nodeY0, nodeY1, nodeM0, nodeM1, nodeCount);
         }
+
+        // Lift/gamma/gain-style lift: raises the floor while leaving white (1.0) pinned in place.
+        outc = outc * (1.0 - blackLift) + blackLift;
 
         return vec4(outc, pix.a);
     }
@@ -127,7 +133,8 @@ public enum RGBCurveKernel {
             pack(ys, 0, 3), pack(ys, 4, 7),
             pack(ms, 0, 3), pack(ms, 4, 7),
             Float(n),
-            Float(params.preserveColors ? 1 : 0)
+            Float(params.preserveColors ? 1 : 0),
+            Float(params.blackLift)
         ]
 
         return kernel.apply(extent: image.extent, arguments: arguments) ?? image

@@ -37,6 +37,24 @@ struct EditorView: View {
     /// time; never affects what's rendered on its own (only writing `stage.maskData` via the
     /// overlay's "Done" button does that).
     @State private var maskEditingStage: Stage?
+    /// Set while `GradientMaskEditorOverlay` is open for a `.linearGradientMask`/
+    /// `.radialGradientMask` stage — same role as `maskEditingStage`, just for the gradient-handle
+    /// editor instead of the brush one; the two are mutually exclusive in practice since only one
+    /// "Edit"/"Adjust" action can be in flight at a time.
+    @State private var gradientEditingStage: Stage?
+    /// Which of `previewBackgroundPalette` the preview pane's backdrop currently shows — purely a
+    /// viewing aid (checking how the image reads against different surrounds), not part of the
+    /// edit itself, so this is plain local `@State`, not persisted or threaded into `scheduleRender`.
+    @State private var previewBackgroundColor: Color = .editorPreviewBackground
+
+    /// Alternatives to `Color.editorPreviewBackground`'s own neutral gray — a small fixed spread
+    /// from black to white (plus the default itself) rather than a full color picker, since the
+    /// point is judging exposure/contrast against different *neutral* surrounds (the same reason
+    /// `editorPreviewBackground` itself isn't pure black — see its own doc comment), not
+    /// decorating the workspace.
+    private let previewBackgroundPalette: [Color] = [
+        .editorPreviewBackground, .black, Color(white: 0.15), Color(white: 0.35), Color(white: 0.65), .white,
+    ]
 
     init(asset: PhotoAsset, onSelectAsset: @escaping (PhotoAsset) -> Void) {
         self.asset = asset
@@ -59,18 +77,28 @@ struct EditorView: View {
                     asset: asset, selectedStage: $selectedStage, activeStages: $activeStages, coordinator: coordinator,
                     history: history,
                     onSelectAsset: onSelectAsset,
-                    onEditMask: { maskEditingStage = $0 }
+                    onEditMask: { maskEditingStage = $0 },
+                    onEditGradientMask: { gradientEditingStage = $0 }
                 )
                 .frame(minWidth: 160, idealWidth: 200, maxWidth: 280)
 
                 ZStack {
-                    Color.editorPreviewBackground
+                    previewBackgroundColor
                     if let maskEditingStage, let previewImage = coordinator.previewImage {
                         AssistedMaskEditorOverlay(
                             stage: maskEditingStage,
                             previewImage: previewImage,
                             onFinished: {
                                 self.maskEditingStage = nil
+                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                            }
+                        )
+                    } else if let gradientEditingStage, let previewImage = coordinator.previewImage {
+                        GradientMaskEditorOverlay(
+                            stage: gradientEditingStage,
+                            previewImage: previewImage,
+                            onFinished: {
+                                self.gradientEditingStage = nil
                                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                             }
                         )
@@ -85,6 +113,7 @@ struct EditorView: View {
                 }
                 .frame(minWidth: 480, minHeight: 400)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topLeading) { previewBackgroundPaletteRow }
 
                 EditorSidebarView(asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator, history: history)
             }
@@ -109,6 +138,34 @@ struct EditorView: View {
                 stageStack: activeStages.map { stageParameters(for: $0, detailEnabled: asset.editDetailEnabled) }
             )
         }
+    }
+
+    /// Small clickable swatches over the preview pane's top-left corner — tapping one sets
+    /// `previewBackgroundColor`; the currently-active swatch gets an accent-colored ring so it's
+    /// clear which surround is showing. Kept small and tucked in a corner rather than in the
+    /// toolbar since this is a minor viewing aid, not a primary edit control.
+    private var previewBackgroundPaletteRow: some View {
+        HStack(spacing: 6) {
+            ForEach(previewBackgroundPalette.indices, id: \.self) { i in
+                let color = previewBackgroundPalette[i]
+                Button {
+                    previewBackgroundColor = color
+                } label: {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(color)
+                        .frame(width: 18, height: 18)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .strokeBorder(
+                                    previewBackgroundColor == color ? Color.accentColor : Color.white.opacity(0.25),
+                                    lineWidth: previewBackgroundColor == color ? 2 : 1
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(10)
     }
 
     /// Sized so the puck circle's own *bottom edge* lands at the same height as the fader bar's

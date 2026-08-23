@@ -23,21 +23,13 @@ struct EditorFooterActions: View {
 
     var body: some View {
         section(nil) {
-            HStack(spacing: 8) {
-                Button("Undo") { history.undo() }
-                    .keyboardShortcut("z", modifiers: .command)
-                    .disabled(!history.canUndo)
-                Button("Redo") { history.redo() }
-                    .keyboardShortcut("z", modifiers: [.command, .shift])
-                    .disabled(!history.canRedo)
-            }
-            Button("Reset All") {
+            wideActionButton("Reset All", enabled: hasAnyEdits(asset: asset, stage: stage)) {
                 resetAllEdits(asset: asset, stage: stage)
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
-            .disabled(!hasAnyEdits(asset: asset, stage: stage))
-            Button("Export…") { exportImage() }
-                .disabled(!coordinator.isReady)
+            wideActionButton("Export…", enabled: coordinator.isReady) {
+                exportImage()
+            }
         }
         .alert("Export", isPresented: Binding(
             get: { exportStatus != nil },
@@ -47,6 +39,25 @@ struct EditorFooterActions: View {
         } message: {
             Text(exportStatus ?? "")
         }
+    }
+
+    /// Full-width, filled-box styling matching the Filmic module button in `EditorSidebarView` —
+    /// these two footer actions get the same visual weight as a primary module toggle instead of a
+    /// plain default-styled button.
+    private func wideActionButton(_ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(enabled ? Color.accentColor : Color.secondary)
+        .background(
+            enabled ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.06),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+        .disabled(!enabled)
     }
 
     private func exportImage() {

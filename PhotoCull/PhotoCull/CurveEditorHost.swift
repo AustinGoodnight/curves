@@ -28,6 +28,12 @@ struct CurveEditorHost: View, Equatable {
     var showHeader: Bool = true
     var topCornersSquared: Bool = false
     var lineColor: Color = .accentColor
+    /// See `CurveEditorControl`'s own doc comment — off by default; RGB Curve's call site turns
+    /// it on, Color Zones leaves it off.
+    var showEndpointControls: Bool = false
+    /// See `CurveEditorControl`'s own doc comment — off by default; Color Zones' call site turns
+    /// it on.
+    var showGrid: Bool = false
     var onPointsChange: ([SIMD2<Double>]) -> Void
 
     /// `splineType` is excluded deliberately: it's a fixed constant per call site (RGB Curve is
@@ -39,6 +45,7 @@ struct CurveEditorHost: View, Equatable {
             && lhs.referenceIsFlat == rhs.referenceIsFlat && lhs.histogram == rhs.histogram
             && lhs.showHueAxis == rhs.showHueAxis && lhs.showHeader == rhs.showHeader
             && lhs.topCornersSquared == rhs.topCornersSquared && lhs.lineColor == rhs.lineColor
+            && lhs.showEndpointControls == rhs.showEndpointControls && lhs.showGrid == rhs.showGrid
     }
 
     var body: some View {
@@ -54,7 +61,9 @@ struct CurveEditorHost: View, Equatable {
             showHueAxis: showHueAxis,
             showHeader: showHeader,
             topCornersSquared: topCornersSquared,
-            lineColor: lineColor
+            lineColor: lineColor,
+            showEndpointControls: showEndpointControls,
+            showGrid: showGrid
         )
     }
 }

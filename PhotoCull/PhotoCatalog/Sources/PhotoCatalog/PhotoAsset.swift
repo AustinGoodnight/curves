@@ -87,12 +87,12 @@ public final class PhotoAsset {
         return stages?.first(where: { $0.kind == .single }) ?? Stage(kind: .single, name: "Single", asset: self)
     }
 
-    /// User-added stages (`.custom` and `.assistedMask`, interleaved in one shared `sortIndex`
-    /// sequence), in display/composite order. Routed to `stack.customStages` whenever `stack` is
-    /// set — same sharing as `singleStage`, see its doc comment.
+    /// User-added stages (every `StageKind.isUserManaged` kind, interleaved in one shared
+    /// `sortIndex` sequence), in display/composite order. Routed to `stack.customStages` whenever
+    /// `stack` is set — same sharing as `singleStage`, see its doc comment.
     public var customStages: [Stage] {
         if let stack { return stack.customStages }
-        return (stages ?? []).filter { $0.kind == .custom || $0.kind == .assistedMask }.sorted { $0.sortIndex < $1.sortIndex }
+        return (stages ?? []).filter { $0.kind.isUserManaged }.sorted { $0.sortIndex < $1.sortIndex }
     }
 
     public var rating: Int {

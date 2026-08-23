@@ -115,8 +115,7 @@ public enum ColorZonesKernel {
         vec4 hNodeX0, vec4 hNodeX1, vec4 hNodeY0, vec4 hNodeY1, vec4 hNodeM0, vec4 hNodeM1, float hCount)
     {
         vec4 pix = sample(image, samplerCoord(image));
-        vec3 rgb = max(pix.rgb, vec3(0.0));
-        vec3 lab = czXyzToLab(czRgbToXYZ(rgb));
+        vec3 lab = czXyzToLab(czRgbToXYZ(pix.rgb));
 
         float a = lab.y;
         float b = lab.z;

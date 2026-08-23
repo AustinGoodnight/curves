@@ -3,9 +3,12 @@ import SwiftUI
 
 /// An alternate vertical fader style being tried for Sharp/Dehaze — identical in form to
 /// `VerticalGradientSlider` (confirmed pixel-identical track width/height via screenshot
-/// measurement, not just matching constants) except for two things: the track has no *color*
-/// fill (a flat neutral tone instead of `VerticalGradientSlider`'s per-parameter gradient), and
-/// the thumb is a circular dot instead of a thin bar.
+/// measurement, not just matching constants), differing only in that the track has no *color*
+/// fill (a flat, dark neutral tone instead of `VerticalGradientSlider`'s per-parameter gradient),
+/// and the thumb is a small glossy dot recessed inside the track (see `thumbFill`) rather than a
+/// thin full-width bar. A thin-bar-thumb variant (matching `VerticalGradientSlider`'s own thumb
+/// shape) was tried in between and dropped — didn't read as clearly as a "value indicator" as a
+/// dot does.
 ///
 /// Getting the width to actually match took two false starts, both worth recording because the
 /// root cause was non-obvious:
@@ -15,13 +18,14 @@ import SwiftUI
 ///    gap between them as part of the track. Fixed by giving the track a flat fill.
 /// 2. Even with a fill, and even with the *exact* same shape composition as
 ///    `VerticalGradientSlider`'s track, it still measured narrower (18px vs 24px, confirmed by
-///    scanning rendered screenshot pixels) — because neither track shape has an explicit
-///    `.frame()`, so both take the enclosing `ZStack`'s own resolved width, which is the *union*
-///    of its children's sizes, not the `trackWidth` constant alone. `VerticalGradientSlider`'s
-///    thumb *bar* is `trackWidth + 6` wide, which is what actually determines its track's
-///    rendered width — the `trackWidth` constant alone understates it. `thumbDiameter` below
-///    matches that same `trackWidth + 6` for exactly this reason, not because a 24pt dot was the
-///    intended visual size.
+///    scanning rendered screenshot pixels) — because neither track shape had an explicit
+///    `.frame()`, so both took the enclosing `ZStack`'s own resolved width, which is the *union*
+///    of its children's sizes, not the `trackWidth` constant alone; whatever the thumb's width was
+///    became the track's rendered width too. The track now has its own explicit
+///    `.frame(width: trackWidth)`, independent of the thumb, so this no longer matters — but
+///    `trackWidth` itself is still set to the width the track was *actually* rendering at back
+///    then (24, not whatever a fresh guess might pick), so it stays pixel-matched with
+///    `VerticalGradientSlider`'s track next to it.
 ///
 /// See `VerticalGradientSlider`'s doc comment for why double-click writes a literal number and
 /// Shift-fine-drag is computed from the previous drag event. Bottom of the track is
@@ -33,14 +37,9 @@ struct VerticalCircleSlider: View {
 
     @State private var previousDragY: CGFloat? = nil
 
-    private let trackWidth: CGFloat = 18
-    // Matches `VerticalGradientSlider`'s thumb *bar* width (`trackWidth + 6`) exactly, not just
-    // some visually-reasonable dot size — see the doc comment above for why: neither shape in
-    // this `ZStack` has an explicit frame, so both take the `ZStack`'s own resolved width, which
-    // is the *union* of its children's sizes, not the `trackWidth` constant alone. Whatever the
-    // thumb's width is becomes the track's rendered width too. Matching the bar's exact width is
-    // what makes this track measure the same as the gradient sliders' track next to it.
-    private let thumbDiameter: CGFloat = 24
+    private let trackWidth: CGFloat = 24
+    // Recessed inside the track, not overflowing past it — matches `MinimalSlider`'s own thumb.
+    private let thumbDiameter: CGFloat = 14
     private let fineFactor: CGFloat = 0.2
 
     var body: some View {
@@ -49,17 +48,22 @@ struct VerticalCircleSlider: View {
             let thumbY = (1 - fraction(for: value)) * height
 
             ZStack(alignment: .top) {
+                // A fill *darker* than the surrounding bar background, not lighter — same change
+                // as `MinimalSlider`'s track, so a groove reads as recessed rather than raised
+                // consistently across both the sidebar and the bar.
                 RoundedRectangle(cornerRadius: trackWidth / 2)
                     .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
                     .background(
-                        Color.white.opacity(0.12)
+                        Color.black.opacity(0.2)
                             .clipShape(RoundedRectangle(cornerRadius: trackWidth / 2))
                     )
+                    .frame(width: trackWidth)
 
                 Circle()
-                    .fill(Color.white)
+                    .fill(thumbFill)
+                    .overlay(Circle().strokeBorder(Color.black.opacity(0.18), lineWidth: 0.75))
                     .frame(width: thumbDiameter, height: thumbDiameter)
-                    .shadow(radius: 1)
+                    .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
                     .offset(y: thumbY - thumbDiameter / 2)
             }
             .contentShape(Rectangle())
@@ -88,6 +92,18 @@ struct VerticalCircleSlider: View {
             )
         }
         .frame(width: trackWidth)
+    }
+
+    /// A slightly off-center highlight (rather than a flat, uniform white fill) — reads as a
+    /// small glossy bead catching light from the upper-left, matching `MinimalSlider`'s own
+    /// `thumbFill` exactly so the sidebar and the bar's faders read as the same control family.
+    private var thumbFill: RadialGradient {
+        RadialGradient(
+            colors: [.white, Color(white: 0.8)],
+            center: UnitPoint(x: 0.35, y: 0.3),
+            startRadius: 0,
+            endRadius: thumbDiameter * 0.75
+        )
     }
 
     private func fraction(for v: Double) -> CGFloat {

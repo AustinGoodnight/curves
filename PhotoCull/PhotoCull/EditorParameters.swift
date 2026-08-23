@@ -91,7 +91,10 @@ func rgbCurvePoints(for stage: Stage) -> [SIMD2<Double>] {
 
 func rgbCurveParameters(for stage: Stage) -> RGBCurveParameters? {
     guard stage.editRGBCurveEnabled else { return nil }
-    return RGBCurveParameters(points: rgbCurvePoints(for: stage), preserveColors: stage.editRGBCurvePreserveColors ?? true)
+    return RGBCurveParameters(
+        points: rgbCurvePoints(for: stage), preserveColors: stage.editRGBCurvePreserveColors ?? true,
+        blackLift: stage.editRGBCurveBlackLift ?? 0
+    )
 }
 
 /// Same flat-interleaved <-> `[SIMD2<Double>]` conversion as `rgbCurvePoints`, but generalized
@@ -193,6 +196,7 @@ func colorBalanceHasEdits(_ stage: Stage) -> Bool {
 
 func rgbCurveHasEdits(_ stage: Stage) -> Bool {
     !stage.editRGBCurveEnabled || stage.editRGBCurvePoints != nil || stage.editRGBCurvePreserveColors != nil
+        || stage.editRGBCurveBlackLift != nil
 }
 
 func colorZonesHasEdits(_ stage: Stage) -> Bool {
@@ -263,6 +267,7 @@ func resetRGBCurve(_ stage: Stage) {
     stage.editRGBCurveEnabled = true
     stage.editRGBCurvePoints = nil
     stage.editRGBCurvePreserveColors = nil
+    stage.editRGBCurveBlackLift = nil
 }
 
 func resetColorZones(_ stage: Stage) {

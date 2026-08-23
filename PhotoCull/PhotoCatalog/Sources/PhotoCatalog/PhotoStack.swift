@@ -27,7 +27,7 @@ public final class PhotoStack {
     }
 
     public var customStages: [Stage] {
-        (stages ?? []).filter { $0.kind == .custom || $0.kind == .assistedMask }.sorted { $0.sortIndex < $1.sortIndex }
+        (stages ?? []).filter { $0.kind.isUserManaged }.sorted { $0.sortIndex < $1.sortIndex }
     }
 
     public init(name: String? = nil) {
