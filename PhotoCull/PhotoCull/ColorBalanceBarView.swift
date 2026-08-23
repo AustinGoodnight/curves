@@ -234,6 +234,15 @@ struct ColorBalanceBarView: View {
                     "Dehaze", value: stageBind(\.editDehazeAmount, fallback: 0, module: detailGate),
                     range: 0...1, valueText: ""
                 )
+                // Asset-level like Sharpness above (see `PhotoAsset.editDenoiseAmount`'s doc
+                // comment), so `bind(...)` not `stageBind(...)`. No `isSharpnessSupported`-style
+                // availability guard — OIDN's Metal device is either up at process launch or it
+                // isn't (`DenoiseFilter.device`), and when it's down the filter just no-ops, same
+                // as dragging this fader to 0.
+                verticalCircleSlider(
+                    "Denoise", value: bind(\.editDenoiseAmount, fallback: 0, module: detailGate),
+                    range: 0...1, valueText: ""
+                )
             }
         }
         .fixedSize(horizontal: true, vertical: false)

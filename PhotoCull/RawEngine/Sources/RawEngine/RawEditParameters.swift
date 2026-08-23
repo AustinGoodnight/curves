@@ -13,8 +13,7 @@ public struct RawBaseParameters: Equatable, Sendable {
     public var sharpnessAmount: Double?
     /// `nil` means "no denoise". Applied immediately after RAW decode, ahead of lens correction —
     /// denoising before the geometric warp keeps noise statistics spatially uniform going in,
-    /// rather than running OIDN on already-resampled pixels (see `DenoiseFilter`'s doc comment for
-    /// the performance caveat on wiring this into a live-dragging control).
+    /// rather than running OIDN on already-resampled pixels (see `DenoiseFilter`'s doc comment).
     public var denoise: DenoiseParameters?
     /// `nil` means "no lens correction" — either no lens matched the shot's EXIF in
     /// `LensCorrectionDatabase`, or the user turned it off. Lives here, not on `StageParameters`,

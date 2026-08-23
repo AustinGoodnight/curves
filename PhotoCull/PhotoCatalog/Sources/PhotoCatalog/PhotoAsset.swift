@@ -43,6 +43,10 @@ public final class PhotoAsset {
     public var editNeutralTemperature: Double?
     public var editNeutralTint: Double?
     public var editSharpnessAmount: Double?
+    /// AI-based noise reduction (`RawEngine`'s OIDN-backed `DenoiseFilter`), 0...1. Asset-level
+    /// like Sharpness above, not per-`Stage` like Dehaze — same "applied once during RAW decode"
+    /// reasoning, and gated by the same `editDetailEnabled` switch below.
+    public var editDenoiseAmount: Double?
 
     /// Module bypass switches for the two asset-level (non-stackable) groups in
     /// `ColorBalanceBarView` — "WB" and "Detail". `true` means apply whatever's stored above/on the
@@ -53,10 +57,14 @@ public final class PhotoAsset {
     /// already lives directly on `PhotoAsset` for the same "not stackable per stage" reason (see
     /// the doc comment above); "Detail" additionally suppresses Dehaze's contribution from every
     /// active `Stage` uniformly rather than per-stage, since there's no single "the stage this
-    /// toggle belongs to" once more than one stage is active at once.
+    /// toggle belongs to" once more than one stage is active at once. Denoise joined this group
+    /// alongside Sharpness rather than getting its own switch — same asset-level "detail
+    /// correction" category, and OIDN's inference cost only applies at all once `amount > 0`
+    /// (`DenoiseFilter.apply` short-circuits before touching the GPU otherwise), so there's no
+    /// separate performance reason to keep it out of the shared bypass.
     ///
     /// `false` by default and whenever the group's own fields are all unset (Temp/Tint for WB;
-    /// Sharpness plus the *current* stage's Dehaze for Detail) — auto-managed by
+    /// Sharpness/Denoise plus the *current* stage's Dehaze for Detail) — auto-managed by
     /// `syncModuleEnabled` in the app target's `EditorParameters.swift`, same "no contribution
     /// until touched" convention as `Stage`'s own module switches. Flips `true` automatically on
     /// the first adjustment to either field; the `StoplightToggle` in `ColorBalanceBarView` still

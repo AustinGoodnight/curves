@@ -17,6 +17,7 @@ func rawBaseParameters(for asset: PhotoAsset) -> RawBaseParameters {
         neutralTemperature: asset.editWhiteBalanceEnabled ? asset.editNeutralTemperature : nil,
         neutralTint: asset.editWhiteBalanceEnabled ? asset.editNeutralTint : nil,
         sharpnessAmount: asset.editDetailEnabled ? asset.editSharpnessAmount : nil,
+        denoise: (asset.editDetailEnabled ? asset.editDenoiseAmount : nil).map(DenoiseParameters.init(amount:)),
         lensCorrection: lensCorrectionParameters(for: asset),
         crop: cropParameters(for: asset)
     )
@@ -282,10 +283,11 @@ func whiteBalanceHasAdjustments(_ asset: PhotoAsset) -> Bool {
     asset.editNeutralTemperature != nil || asset.editNeutralTint != nil
 }
 
-/// Spans both `asset` (Sharpness) and `stage` (Dehaze) — "Detail" is the one bypass switch that
-/// gates fields living on two different owners, see `PhotoAsset.editDetailEnabled`'s doc comment.
+/// Spans both `asset` (Sharpness, Denoise) and `stage` (Dehaze) — "Detail" is the one bypass
+/// switch that gates fields living on two different owners, see
+/// `PhotoAsset.editDetailEnabled`'s doc comment.
 func detailHasAdjustments(asset: PhotoAsset, stage: Stage) -> Bool {
-    asset.editSharpnessAmount != nil || stage.editDehazeAmount != nil
+    asset.editSharpnessAmount != nil || asset.editDenoiseAmount != nil || stage.editDehazeAmount != nil
 }
 
 /// Whether `stage` itself carries any adjustments — used to grey out per-stage reset buttons and
@@ -315,6 +317,7 @@ func cropHasAdjustments(_ asset: PhotoAsset) -> Bool {
 
 func hasAnyEdits(asset: PhotoAsset, stage: Stage) -> Bool {
     asset.editExposure != nil || whiteBalanceHasAdjustments(asset) || asset.editSharpnessAmount != nil
+        || asset.editDenoiseAmount != nil
         || !asset.editLensCorrectionEnabled || asset.editLensCorrectionIntensity != nil
         || cropHasAdjustments(asset)
         || stageHasEdits(stage)
@@ -392,6 +395,7 @@ func resetAllEdits(asset: PhotoAsset, stage: Stage) {
     asset.editNeutralTemperature = nil
     asset.editNeutralTint = nil
     asset.editSharpnessAmount = nil
+    asset.editDenoiseAmount = nil
     asset.editWhiteBalanceEnabled = false
     asset.editDetailEnabled = false
     asset.editLensCorrectionEnabled = true

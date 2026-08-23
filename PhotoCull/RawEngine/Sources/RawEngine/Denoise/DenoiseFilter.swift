@@ -13,11 +13,12 @@ import Foundation
 /// Core Image fuse everything lazily at the final `CIContext.render` call in `RawImageRenderer`.
 ///
 /// Performance note: unlike the CIKernel-based modules, this is a real neural-net inference pass,
-/// not a cheap per-pixel formula — expensive enough that it must not be re-run on every editor
-/// slider tick the way `RawImageRenderer` currently re-runs the rest of the stage stack. Whatever
-/// calls this needs its own debounce-on-settle (or cached/`.onChange`-driven) treatment before
-/// it's wired into a live-dragging UI control, the same class of trap CLAUDE.md documents for
-/// `ContentView`/`CullingGridView`.
+/// not a cheap per-pixel formula. It's still safe to call on every editor slider tick — the app
+/// target's `EditorRenderCoordinator` already coalesces a burst of `scheduleRender` calls down to
+/// "run whatever's newest once the previous render is free" and does a cheap `draft` pass (this
+/// filter's "balanced" OIDN quality mode) during the drag, a crisp one only once input settles —
+/// but that coalescing is what makes it safe, not anything in this file. Don't call this directly
+/// from a tight per-frame loop that bypasses that mechanism.
 enum DenoiseFilter {
     private static let workingColorSpace = CGColorSpace(name: CGColorSpace.linearSRGB) ?? CGColorSpaceCreateDeviceRGB()
 
