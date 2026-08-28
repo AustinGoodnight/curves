@@ -24,6 +24,10 @@ public struct RawBaseParameters: Equatable, Sendable {
     /// `crop` — see `SpotRemoval`'s doc comment for why its coordinates are defined in this,
     /// pre-crop frame, and `RawImageRenderer`'s render methods for exactly where this runs.
     public var spotRemoval: SpotRemovalParameters?
+    /// `nil` means "no AI-removed objects". Applied immediately after `spotRemoval` (same pre-crop
+    /// frame, same reasoning) — see `ObjectRemovalKernel`'s doc comment for why this is cheap
+    /// despite the fill itself (`InpaintingFilter`) being expensive to produce.
+    public var objectRemovals: ObjectRemovalParameters?
     /// `nil` means "no straighten/crop" (full, unrotated frame). Unlike every other field on this
     /// struct, `RawImageRenderer` applies this dead last, after the stage stack — see
     /// `CropParameters`'s doc comment for why.
@@ -38,6 +42,7 @@ public struct RawBaseParameters: Equatable, Sendable {
         denoise: DenoiseParameters? = nil,
         lensCorrection: LensCorrectionParameters? = nil,
         spotRemoval: SpotRemovalParameters? = nil,
+        objectRemovals: ObjectRemovalParameters? = nil,
         crop: CropParameters? = nil
     ) {
         self.exposure = exposure
@@ -48,6 +53,7 @@ public struct RawBaseParameters: Equatable, Sendable {
         self.denoise = denoise
         self.lensCorrection = lensCorrection
         self.spotRemoval = spotRemoval
+        self.objectRemovals = objectRemovals
         self.crop = crop
     }
 

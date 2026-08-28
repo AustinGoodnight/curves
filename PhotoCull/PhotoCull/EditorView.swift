@@ -46,6 +46,9 @@ struct EditorView: View {
     /// Set while `ColorRangeMaskEditorOverlay` is open for a `.colorRangeMask` stage — same role as
     /// `gradientEditingStage`, just for the color-sampling editor instead.
     @State private var colorRangeEditingStage: Stage?
+    /// Set while `ObjectMaskEditorOverlay` is open for a `.objectMask` stage — same role as
+    /// `colorRangeEditingStage`, just for the Vision object-selection editor instead.
+    @State private var objectMaskEditingStage: Stage?
     /// Set while `CropEditorOverlay` is open — same role as `gradientEditingStage`, just asset-level
     /// (crop/straighten isn't per-`Stage`, see `CropParameters`'s doc comment) so a plain `Bool`
     /// rather than an optional `Stage`.
@@ -54,6 +57,14 @@ struct EditorView: View {
     /// blemish/dust-spot healing instead of crop (also asset-level, see `SpotRemoval`'s doc comment
     /// on `RawEngine`).
     @State private var spotRemovalEditing = false
+    /// Set while `RemoveObjectEditorOverlay` is open — same role as `spotRemovalEditing`, just for
+    /// Vision-selected + AI-generated object removal instead of manual clone/heal (also
+    /// asset-level, see `ObjectRemoval`'s doc comment on `RawEngine`).
+    @State private var objectRemovalEditing = false
+    /// Set while `PaintedFillEditorOverlay` is open — same role as `objectRemovalEditing`, just for
+    /// a hand-painted mask instead of Vision's click-to-select; both write the same
+    /// `asset.objectRemovalData` list.
+    @State private var paintedFillEditing = false
     /// Which of `previewBackgroundPalette` the preview pane's backdrop currently shows — purely a
     /// viewing aid (checking how the image reads against different surrounds), not part of the
     /// edit itself, so this is plain local `@State`, not persisted or threaded into `scheduleRender`.
@@ -82,7 +93,8 @@ struct EditorView: View {
                     onSelectAsset: onSelectAsset,
                     onEditMask: { maskEditingStage = $0 },
                     onEditGradientMask: { gradientEditingStage = $0 },
-                    onEditColorRangeMask: { colorRangeEditingStage = $0 }
+                    onEditColorRangeMask: { colorRangeEditingStage = $0 },
+                    onEditObjectMask: { objectMaskEditingStage = $0 }
                 )
                 .frame(minWidth: 160, idealWidth: 200, maxWidth: 280)
 
@@ -115,6 +127,25 @@ struct EditorView: View {
                                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                             }
                         )
+                    } else if let objectMaskEditingStage, let previewImage = coordinator.previewImage {
+                        ObjectMaskEditorOverlay(
+                            stage: objectMaskEditingStage,
+                            previewImage: previewImage,
+                            onFinished: {
+                                self.objectMaskEditingStage = nil
+                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                            }
+                        )
+                    } else if paintedFillEditing, coordinator.isReady {
+                        PaintedFillEditorOverlay(
+                            asset: asset,
+                            activeStages: activeStages,
+                            coordinator: coordinator,
+                            onFinished: {
+                                paintedFillEditing = false
+                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                            }
+                        )
                     } else if cropEditing, coordinator.isReady {
                         CropEditorOverlay(
                             asset: asset,
@@ -132,6 +163,16 @@ struct EditorView: View {
                             coordinator: coordinator,
                             onFinished: {
                                 spotRemovalEditing = false
+                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                            }
+                        )
+                    } else if objectRemovalEditing, coordinator.isReady {
+                        RemoveObjectEditorOverlay(
+                            asset: asset,
+                            activeStages: activeStages,
+                            coordinator: coordinator,
+                            onFinished: {
+                                objectRemovalEditing = false
                                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                             }
                         )
@@ -200,6 +241,26 @@ struct EditorView: View {
             .buttonStyle(.plain)
             .foregroundStyle(spotRemovalHasAdjustments(asset) ? uiColors.accentColor : .primary)
             .help(spotRemovalHasAdjustments(asset) ? "Adjust Spot Removal…" : "Spot Removal…")
+
+            Button {
+                objectRemovalEditing = true
+            } label: {
+                Image(systemName: "wand.and.sparkles")
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(objectRemovalHasAdjustments(asset) ? uiColors.accentColor : .primary)
+            .help(objectRemovalHasAdjustments(asset) ? "Adjust Remove Object…" : "Remove Object (AI)…")
+
+            Button {
+                paintedFillEditing = true
+            } label: {
+                Image(systemName: "paintbrush.pointed.fill")
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(objectRemovalHasAdjustments(asset) ? uiColors.accentColor : .primary)
+            .help(objectRemovalHasAdjustments(asset) ? "Adjust AI Fill (Painted Mask)…" : "AI Fill (Painted Mask)…")
 
             Divider().frame(height: 16)
 

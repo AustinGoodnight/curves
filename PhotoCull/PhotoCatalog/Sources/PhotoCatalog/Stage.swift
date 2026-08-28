@@ -5,7 +5,7 @@ import SwiftData
 /// `PhotoAsset`/`PhotoScene` has exactly one, created alongside its owner and never deleted or
 /// renamed. `.custom`, `.assistedMask`, `.linearGradientMask`, `.radialGradientMask`, and
 /// `.colorRangeMask` stages are freely added/removed/renamed by the user and share one `sortIndex`
-/// sequence (see `PhotoAsset.customStages`'s doc comment). The four mask kinds all differ from
+/// sequence (see `PhotoAsset.customStages`'s doc comment). The five mask kinds all differ from
 /// `.custom` only in how `maskData` gets populated: `.assistedMask` via the assisted mask editor
 /// (rough brush strokes refined to the photo's own edges by a guided filter — see
 /// `GuidedMaskRefiner` in the app target); `.linearGradientMask`/`.radialGradientMask` via
@@ -13,7 +13,11 @@ import SwiftData
 /// it stays live-editable ("Adjust Gradient…") instead of only being a baked raster like the other
 /// mask kinds; `.colorRangeMask` via `ColorRangeMaskEditorOverlay` (click-to-sample a color, then
 /// threshold/feather select every pixel near it), which similarly keeps its own parameters on
-/// `colorRangeRed`/etc. for the same "Adjust…" live-reedit reason. A stack doesn't get its own kind
+/// `colorRangeRed`/etc. for the same "Adjust…" live-reedit reason; `.objectMask` via
+/// `ObjectMaskEditorOverlay` (click a Vision-detected object/subject to add its whole silhouette to
+/// the mask, option-click to remove one) — a baked raster like `.assistedMask`, no live-reedit
+/// parameters of its own, since a Vision instance selection has no small parameter set the way a
+/// gradient or color sample does. A stack doesn't get its own kind
 /// — see `PhotoStack.stages`'s doc comment for why a stacked photo's `.single`/`.custom`/mask stages
 /// are the *same kind*, just owned by the stack instead of the asset.
 public enum StageKind: Int, Codable, Sendable {
@@ -24,6 +28,7 @@ public enum StageKind: Int, Codable, Sendable {
     case linearGradientMask = 4
     case radialGradientMask = 5
     case colorRangeMask = 6
+    case objectMask = 7
 
     /// Whether this kind belongs to the user-managed `.custom`-style sequence (freely added,
     /// renamed, deleted, ordered by `sortIndex`) rather than being structural like `.single`/
@@ -42,6 +47,7 @@ public enum StageKind: Int, Codable, Sendable {
         case .linearGradientMask: return "rectangle.righthalf.filled"
         case .radialGradientMask: return "target"
         case .colorRangeMask: return "eyedropper"
+        case .objectMask: return "wand.and.rays"
         case .single, .scene, .custom: return nil
         }
     }

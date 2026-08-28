@@ -189,18 +189,23 @@ struct ColorBalanceBarView: View {
                     // decimal-place values ("−0.50", "45.00") were overflowing the pill and
                     // wrapping; Temp/Tint above don't have that problem, so they keep theirs.
                     verticalGradientSlider(
-                        "Chr", value: stageBind(\.editColorBalanceChromaGlobal, fallback: 0, module: balanceGate),
+                        "Chr", value: stageBind(
+                            \.editColorBalanceChromaGlobal, fallback: 0, module: balanceGate, masterModule: outerColorBalanceGate
+                        ),
                         range: -0.5...0.5, gradient: .colorIntensity,
                         valueText: "", diamondThumb: true
                     )
                     verticalGradientSlider(
-                        "Vib", value: stageBind(\.editColorBalanceVibrance, fallback: 0, module: balanceGate),
+                        "Vib", value: stageBind(
+                            \.editColorBalanceVibrance, fallback: 0, module: balanceGate, masterModule: outerColorBalanceGate
+                        ),
                         range: -0.5...0.5, gradient: .colorIntensity,
                         valueText: "", diamondThumb: true
                     )
                     verticalGradientSlider(
                         "Sat", value: stageBind(
-                            \.editFilmicSaturation, fallback: FilmicRGBParameters.darktableDefault.saturation, module: balanceGate
+                            \.editFilmicSaturation, fallback: FilmicRGBParameters.darktableDefault.saturation,
+                            module: balanceGate, masterModule: outerColorBalanceGate
                         ),
                         range: -100...100, gradient: .colorIntensity,
                         valueText: "", resetValue: FilmicRGBParameters.darktableDefault.saturation, diamondThumb: true
@@ -354,20 +359,26 @@ struct ColorBalanceBarView: View {
             diameter: wheelDiameter,
             onHueChange: { newValue in
                 let hadAdjustments = colorWheelsGate.hasAdjustments()
+                let hadMasterAdjustments = outerColorBalanceGate.hasAdjustments()
                 stage[keyPath: h] = newValue
                 syncModuleEnabled(colorWheelsGate, hadAdjustments: hadAdjustments)
+                syncModuleEnabled(outerColorBalanceGate, hadAdjustments: hadMasterAdjustments)
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             },
             onChromaChange: { newValue in
                 let hadAdjustments = colorWheelsGate.hasAdjustments()
+                let hadMasterAdjustments = outerColorBalanceGate.hasAdjustments()
                 stage[keyPath: c] = newValue
                 syncModuleEnabled(colorWheelsGate, hadAdjustments: hadAdjustments)
+                syncModuleEnabled(outerColorBalanceGate, hadAdjustments: hadMasterAdjustments)
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             },
             onLuminanceChange: { newValue in
                 let hadAdjustments = colorWheelsGate.hasAdjustments()
+                let hadMasterAdjustments = outerColorBalanceGate.hasAdjustments()
                 stage[keyPath: y] = newValue
                 syncModuleEnabled(colorWheelsGate, hadAdjustments: hadAdjustments)
+                syncModuleEnabled(outerColorBalanceGate, hadAdjustments: hadMasterAdjustments)
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
@@ -397,16 +408,31 @@ struct ColorBalanceBarView: View {
         )
     }
 
+    /// `masterModule`, when passed, is synced *in addition to* `module` — for the Color Wheels/
+    /// Balance sub-groups, which each have their own inner bypass switch (`module`) but also need
+    /// to keep the whole Color Balance RGB module's outer switch (`editColorBalanceEnabled`,
+    /// `masterModule`) in sync, since `colorBalanceParameters(for:)` gates on that outer switch
+    /// before even looking at the inner ones. Previously only "Contrast" (in `EditorSidebarView`,
+    /// the one field with no inner sub-group of its own) synced the outer switch — dragging a wheel
+    /// or a Chr/Vib/Sat slider without ever touching Contrast stored the value and moved the UI but
+    /// left `editColorBalanceEnabled` false, so the render's own top-level guard silently dropped
+    /// the whole module. Both gates read `hasAdjustments()` *before* the mutation, same as the
+    /// single-gate case below.
     private func stageBind(
-        _ keyPath: ReferenceWritableKeyPath<Stage, Double?>, fallback: Double, module: ModuleGate? = nil
+        _ keyPath: ReferenceWritableKeyPath<Stage, Double?>, fallback: Double, module: ModuleGate? = nil,
+        masterModule: ModuleGate? = nil
     ) -> Binding<Double> {
         Binding(
             get: { stage[keyPath: keyPath] ?? fallback },
             set: { newValue in
                 let hadAdjustments = module?.hasAdjustments()
+                let hadMasterAdjustments = masterModule?.hasAdjustments()
                 stage[keyPath: keyPath] = newValue
                 if let module, let hadAdjustments {
                     syncModuleEnabled(module, hadAdjustments: hadAdjustments)
+                }
+                if let masterModule, let hadMasterAdjustments {
+                    syncModuleEnabled(masterModule, hadAdjustments: hadMasterAdjustments)
                 }
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
@@ -423,6 +449,14 @@ struct ColorBalanceBarView: View {
 
     private var balanceGate: ModuleGate {
         ModuleGate(hasAdjustments: { balanceGroupHasAdjustments(stage) }, setEnabled: { stage.editBalanceEnabled = $0 })
+    }
+
+    /// The whole Color Balance RGB module's outer bypass switch — see `stageBind`'s
+    /// `masterModule` doc comment for why the Wheels/Balance sub-groups need to sync this in
+    /// addition to their own inner gate above. Matches `EditorSidebarView`'s identically-defined
+    /// `colorBalanceGate` (Contrast's own gate, since Contrast has no inner sub-group).
+    private var outerColorBalanceGate: ModuleGate {
+        ModuleGate(hasAdjustments: { colorBalanceHasAdjustments(stage) }, setEnabled: { stage.editColorBalanceEnabled = $0 })
     }
 
     private var detailGate: ModuleGate {

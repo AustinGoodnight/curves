@@ -20,6 +20,7 @@ func rawBaseParameters(for asset: PhotoAsset) -> RawBaseParameters {
         denoise: (asset.editDetailEnabled ? asset.editDenoiseAmount : nil).map(DenoiseParameters.init(amount:)),
         lensCorrection: lensCorrectionParameters(for: asset),
         spotRemoval: spotRemovalParameters(for: asset),
+        objectRemovals: objectRemovalParameters(for: asset),
         crop: cropParameters(for: asset)
     )
 }
@@ -46,6 +47,15 @@ func spotRemovalParameters(for asset: PhotoAsset) -> SpotRemovalParameters? {
     guard let data = asset.spotRemovalData,
           let spots = try? JSONDecoder().decode([SpotRemoval].self, from: data), !spots.isEmpty else { return nil }
     return SpotRemovalParameters(spots: spots)
+}
+
+/// Decodes `asset.objectRemovalData` (see its doc comment on `PhotoAsset`) back into the
+/// `ObjectRemovalParameters` `RawImageRenderer` reads — same "nil = no contribution" convention as
+/// `spotRemovalParameters(for:)`.
+func objectRemovalParameters(for asset: PhotoAsset) -> ObjectRemovalParameters? {
+    guard let data = asset.objectRemovalData,
+          let removals = try? JSONDecoder().decode([ObjectRemoval].self, from: data), !removals.isEmpty else { return nil }
+    return ObjectRemovalParameters(removals: removals)
 }
 
 /// `nil` whenever `asset` has no straighten/crop set at all — same "nil = no contribution"
@@ -310,6 +320,11 @@ func cropHasAdjustments(_ asset: PhotoAsset) -> Bool {
 /// looking like a real edit.
 func spotRemovalHasAdjustments(_ asset: PhotoAsset) -> Bool {
     spotRemovalParameters(for: asset) != nil
+}
+
+/// Same "check the decoded params, not just non-nil Data" reasoning as `spotRemovalHasAdjustments`.
+func objectRemovalHasAdjustments(_ asset: PhotoAsset) -> Bool {
+    objectRemovalParameters(for: asset) != nil
 }
 
 // MARK: - Reset

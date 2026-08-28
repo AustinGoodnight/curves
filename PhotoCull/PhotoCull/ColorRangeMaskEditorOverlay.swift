@@ -19,6 +19,7 @@ struct ColorRangeMaskEditorOverlay: View {
     /// fields before calling it, Cancel never touched either.
     var onFinished: () -> Void
 
+    @Environment(ColorSchemeStore.self) private var uiColors
     @State private var targetColor = SIMD3<Double>(0.5, 0.5, 0.5)
     /// Whether the user has clicked the image at least once yet this session — before that there's
     /// no sampled color to build a mask from, so the preview stays blank rather than showing a
@@ -35,25 +36,34 @@ struct ColorRangeMaskEditorOverlay: View {
         CGSize(width: previewImage.width, height: previewImage.height)
     }
 
+    /// Pinch-to-zoom + scroll-to-pan while sampling a color — see `ZoomPanState`'s doc comment.
+    @State private var zoomPan = ZoomPanState()
+
     var body: some View {
-        VStack(spacing: 0) {
-            GeometryReader { geometry in
-                let fitRect = Self.aspectFitRect(imageSize: imageSize, in: geometry.size)
+        GeometryReader { geometry in
+                let baseFitRect = Self.aspectFitRect(imageSize: imageSize, in: geometry.size)
+                let fitRect = zoomPan.apply(to: baseFitRect)
                 ZStack {
                     Image(decorative: previewImage, scale: 1)
                         .resizable()
-                        .aspectRatio(contentMode: .fit)
+                        .frame(width: fitRect.width, height: fitRect.height)
+                        .position(x: fitRect.midX, y: fitRect.midY)
                     if let displayedMaskAlpha {
                         Color.cyan.opacity(0.5)
                             .mask(
                                 Image(decorative: displayedMaskAlpha, scale: 1)
                                     .resizable()
-                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: fitRect.width, height: fitRect.height)
+                                    .position(x: fitRect.midX, y: fitRect.midY)
                             )
                             .allowsHitTesting(false)
                     }
+                    ScrollWheelCatcher { delta in zoomPan.pan(by: delta) }
+                    MagnifyCatcher { delta, location in zoomPan.magnify(by: delta, anchor: location, baseFitRect: baseFitRect) }
+                    zoomPan.percentPill(containerSize: geometry.size)
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
                 .contentShape(Rectangle())
                 .gesture(
                     // `DragGesture(minimumDistance: 0)`, not `.onTapGesture`, matching
@@ -71,9 +81,7 @@ struct ColorRangeMaskEditorOverlay: View {
                 )
             }
             .padding()
-
-            toolbar
-        }
+        .overlay(alignment: .bottom) { toolbar }
         .task(id: stage.id) {
             loadGeometry()
             updateMask()
@@ -92,23 +100,29 @@ struct ColorRangeMaskEditorOverlay: View {
             Text("Threshold")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Slider(value: Binding(get: { threshold }, set: { threshold = $0; updateMask() }), in: 0.01...1) { Text("Threshold") }
-                .frame(width: 140)
+            MinimalSlider(value: Binding(get: { Double(threshold) }, set: { threshold = CGFloat($0); updateMask() }), range: 0.01...1)
+                .frame(width: 100)
             Text("Feather")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Slider(value: Binding(get: { feather }, set: { feather = $0; updateMask() }), in: 0.01...1) { Text("Feather") }
-                .frame(width: 140)
-            Toggle("Invert", isOn: Binding(get: { inverted }, set: { inverted = $0; updateMask() }))
-                .toggleStyle(.button)
-            Spacer()
+            MinimalSlider(value: Binding(get: { Double(feather) }, set: { feather = CGFloat($0); updateMask() }), range: 0.01...1)
+                .frame(width: 100)
+            Button("Invert") { inverted.toggle(); updateMask() }
+                .buttonStyle(.plain)
+                .foregroundStyle(inverted ? uiColors.accentColor : .primary)
+            Divider().frame(height: 16)
             Button("Cancel") { onFinished() }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
             Button("Done") { finish() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
+                .foregroundStyle(uiColors.accentColor)
                 .disabled(!hasSampled)
         }
-        .padding(10)
-        .background(.thinMaterial)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.bottom, 10)
     }
 
     // MARK: - Geometry loading / saving

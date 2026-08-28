@@ -18,6 +18,7 @@ struct AssistedMaskEditorOverlay: View {
     /// never touched it.
     var onFinished: () -> Void
 
+    @Environment(ColorSchemeStore.self) private var uiColors
     @State private var brushRadius: CGFloat = 28
     /// Drives `GuidedMaskRefiner.refine(epsilon:)` on a log scale (`epsilon = 10^(-1 - 3 ×
     /// sensitivity)`, ranging 1e-1 at 0 to 1e-4 at 1) — a linear slider over epsilon itself would
@@ -44,6 +45,9 @@ struct AssistedMaskEditorOverlay: View {
     /// drag's vertical delta maps to a size change relative to where it began, not to the previous
     /// event — matters because event deltas alone would compound rounding across a long drag.
     @State private var resizeAnchor: (radius: CGFloat, location: CGPoint)?
+    /// Pinch-to-zoom + scroll-to-pan while painting — see `ZoomPanState`'s doc comment for why
+    /// panning can't reuse `ZoomableImagePane`'s "drag to pan" (drag is the brush here).
+    @State private var zoomPan = ZoomPanState()
     private static let brushRadiusRange: ClosedRange<CGFloat> = 6...80
 
     private var imageSize: CGSize {
@@ -51,19 +55,21 @@ struct AssistedMaskEditorOverlay: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            GeometryReader { geometry in
-                let fitRect = Self.aspectFitRect(imageSize: imageSize, in: geometry.size)
+        GeometryReader { geometry in
+                let baseFitRect = Self.aspectFitRect(imageSize: imageSize, in: geometry.size)
+                let fitRect = zoomPan.apply(to: baseFitRect)
                 ZStack {
                     Image(decorative: previewImage, scale: 1)
                         .resizable()
-                        .aspectRatio(contentMode: .fit)
+                        .frame(width: fitRect.width, height: fitRect.height)
+                        .position(x: fitRect.midX, y: fitRect.midY)
                     if let displayedMaskAlpha {
                         Color.cyan.opacity(0.5)
                             .mask(
                                 Image(decorative: displayedMaskAlpha, scale: 1)
                                     .resizable()
-                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: fitRect.width, height: fitRect.height)
+                                    .position(x: fitRect.midX, y: fitRect.midY)
                             )
                             .allowsHitTesting(false)
                     }
@@ -80,8 +86,12 @@ struct AssistedMaskEditorOverlay: View {
                             .position(cursorLocation)
                             .allowsHitTesting(false)
                     }
+                    ScrollWheelCatcher { delta in zoomPan.pan(by: delta) }
+                    MagnifyCatcher { delta, location in zoomPan.magnify(by: delta, anchor: location, baseFitRect: baseFitRect) }
+                    zoomPan.percentPill(containerSize: geometry.size)
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
                 .contentShape(Rectangle())
                 .onContinuousHover { phase in
                     switch phase {
@@ -111,9 +121,7 @@ struct AssistedMaskEditorOverlay: View {
                 )
             }
             .padding()
-
-            toolbar
-        }
+        .overlay(alignment: .bottom) { toolbar }
         .task(id: stage.id) {
             let newCanvas = MaskCanvas(size: imageSize)
             if let existingData = stage.maskData, let existingImage = CGImage.decodePNG(existingData) {
@@ -129,13 +137,16 @@ struct AssistedMaskEditorOverlay: View {
             Text("Brush · Option-drag to erase · ⌘-drag to resize")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Slider(value: $brushRadius, in: Self.brushRadiusRange) { Text("Brush Size") }
-                .frame(width: 140)
+            MinimalSlider(
+                value: Binding(get: { Double(brushRadius) }, set: { brushRadius = CGFloat($0) }),
+                range: Double(Self.brushRadiusRange.lowerBound)...Double(Self.brushRadiusRange.upperBound)
+            )
+            .frame(width: 100)
             Text("Edge Sensitivity")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Slider(value: $refineSensitivity, in: 0...1) { Text("Edge Sensitivity") }
-                .frame(width: 140)
+            MinimalSlider(value: $refineSensitivity, range: 0...1)
+                .frame(width: 100)
             if isRefining {
                 ProgressView()
                     .controlSize(.small)
@@ -145,16 +156,23 @@ struct AssistedMaskEditorOverlay: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
-            Spacer()
+            Divider().frame(height: 16)
             Button("Refine") { refine() }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
                 .disabled(displayedMask == nil || isRefining)
             Button("Cancel") { onFinished() }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
             Button("Done") { finish() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
+                .foregroundStyle(uiColors.accentColor)
                 .disabled(displayedMask == nil)
         }
-        .padding(10)
-        .background(.thinMaterial)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.bottom, 10)
     }
 
     // MARK: - Interaction

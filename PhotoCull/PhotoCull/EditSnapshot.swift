@@ -10,6 +10,14 @@ struct EditSnapshot: Equatable {
     var assetNeutralTemperature: Double?
     var assetNeutralTint: Double?
     var assetSharpnessAmount: Double?
+    /// JSON-encoded `[SpotRemoval]`/`[ObjectRemoval]` (see `RawEngine`) — captured as opaque `Data`
+    /// blobs, same as every other field here; `EditSnapshot` only needs `Equatable`, never needs to
+    /// decode them itself. Added so `SpotRemovalEditorOverlay`/`RemoveObjectEditorOverlay`/
+    /// `PaintedFillEditorOverlay`'s edits participate in Cmd+Z — their `onFinished` closures already
+    /// call `scheduleRender(...,history:)` like every other edit, so capturing these two fields is
+    /// the only change needed; nothing in `EditHistory` itself or the three overlays had to change.
+    var assetSpotRemovalData: Data?
+    var assetObjectRemovalData: Data?
     var stages: [StageEntry]
 
     /// Holds the live `Stage` reference alongside its captured fields so `apply(to:)` can write
@@ -31,6 +39,8 @@ struct EditSnapshot: Equatable {
         assetNeutralTemperature = asset.editNeutralTemperature
         assetNeutralTint = asset.editNeutralTint
         assetSharpnessAmount = asset.editSharpnessAmount
+        assetSpotRemovalData = asset.spotRemovalData
+        assetObjectRemovalData = asset.objectRemovalData
         stages = activeStages.map { StageEntry(stageID: $0.id, stage: $0, fields: StageFieldSnapshot(capturing: $0)) }
     }
 
@@ -41,6 +51,8 @@ struct EditSnapshot: Equatable {
         asset.editNeutralTemperature = assetNeutralTemperature
         asset.editNeutralTint = assetNeutralTint
         asset.editSharpnessAmount = assetSharpnessAmount
+        asset.spotRemovalData = assetSpotRemovalData
+        asset.objectRemovalData = assetObjectRemovalData
         for entry in stages {
             entry.fields.apply(to: entry.stage)
         }
@@ -57,6 +69,8 @@ struct EditSnapshot: Equatable {
             changed.insert("White Balance")
         }
         if before.assetSharpnessAmount != after.assetSharpnessAmount { changed.insert("Sharpness") }
+        if before.assetSpotRemovalData != after.assetSpotRemovalData { changed.insert("Spot Removal") }
+        if before.assetObjectRemovalData != after.assetObjectRemovalData { changed.insert("Remove Object") }
         for beforeEntry in before.stages {
             guard let afterEntry = after.stages.first(where: { $0.stageID == beforeEntry.stageID }) else { continue }
             changed.formUnion(afterEntry.fields.changedModules(from: beforeEntry.fields))

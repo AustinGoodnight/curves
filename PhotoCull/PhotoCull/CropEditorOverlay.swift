@@ -29,6 +29,8 @@ struct CropEditorOverlay: View {
     let coordinator: EditorRenderCoordinator
     var onFinished: () -> Void
 
+    @Environment(ColorSchemeStore.self) private var uiColors
+
     /// This overlay's own preview render, deliberately independent of `coordinator.previewImage` —
     /// see `loadUncroppedPreview`.
     @State private var previewImage: CGImage?
@@ -96,7 +98,7 @@ struct CropEditorOverlay: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        Group {
             if let previewImage {
                 GeometryReader { geometry in
                     let fitRect = Self.aspectFitRect(imageSize: rotatedSize, in: geometry.size)
@@ -150,9 +152,8 @@ struct CropEditorOverlay: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-
-            toolbar
         }
+        .overlay(alignment: .bottom) { toolbar }
         .task(id: asset.id) {
             loadGeometry()
             await loadUncroppedPreview()
@@ -234,12 +235,14 @@ struct CropEditorOverlay: View {
                 Text("Straighten")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Slider(value: angleBinding, in: -45...45) { Text("Straighten") }
-                    .frame(width: 220)
+                MinimalSlider(value: angleBinding, range: -45...45)
+                    .frame(width: 160)
                 Text(String(format: "%.1f°", angleDegrees))
                     .font(.caption.monospacedDigit())
                     .frame(width: 44, alignment: .leading)
                 Button("Reset") { angleDegrees = 0; clampCropRectToSafeBounds() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
                     .disabled(angleDegrees == 0)
 
                 Divider().frame(height: 20)
@@ -267,18 +270,23 @@ struct CropEditorOverlay: View {
                 .labelsHidden()
                 .frame(width: 130)
             }
-            HStack {
+            HStack(spacing: 12) {
                 Text("Drag a handle to resize, drag inside to reposition")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Spacer()
+                Divider().frame(height: 16)
                 Button("Cancel") { onFinished() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
                 Button("Done") { finish() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(uiColors.accentColor)
             }
         }
-        .padding(10)
-        .background(.thinMaterial)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.bottom, 10)
     }
 
     private var angleBinding: Binding<Double> {

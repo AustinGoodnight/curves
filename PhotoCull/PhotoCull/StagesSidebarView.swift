@@ -39,6 +39,10 @@ struct StagesSidebarView: View {
     /// `.colorRangeMask` stage — same two call sites as `onEditMask`/`onEditGradientMask`, just
     /// routed to the color-sampling editor instead.
     var onEditColorRangeMask: (Stage) -> Void
+    /// Enters `ObjectMaskEditorOverlay` (`EditorView.objectMaskEditingStage`) for the given
+    /// `.objectMask` stage — same two call sites as the other `onEdit*Mask` closures, just routed
+    /// to the Vision object-selection editor instead.
+    var onEditObjectMask: (Stage) -> Void
     @Environment(\.modelContext) private var modelContext
     @Environment(ColorSchemeStore.self) private var uiColors
 
@@ -137,6 +141,13 @@ struct StagesSidebarView: View {
                 addColorRangeMaskStage()
             } label: {
                 Label("Add Color Range Mask", systemImage: "eyedropper")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            Button {
+                addObjectMaskStage()
+            } label: {
+                Label("Add Object Mask (AI)", systemImage: "wand.and.rays")
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -335,6 +346,9 @@ struct StagesSidebarView: View {
             if stage.kind == .colorRangeMask {
                 Button("Adjust Color Range…") { onEditColorRangeMask(stage) }
             }
+            if stage.kind == .objectMask {
+                Button("Adjust Object Mask…") { onEditObjectMask(stage) }
+            }
             Button("Save as Preset…") { beginSavePreset(stage) }
             Button("Save as Default Stage") { saveAsDefaultStage(stage) }
             // Scene/Single are structural (see `Stage`'s doc comment) — never renamed or deleted.
@@ -473,6 +487,24 @@ struct StagesSidebarView: View {
         selectedStage = stage
         refreshAndRender()
         onEditColorRangeMask(stage)
+    }
+
+    /// Same blank-slate/ownership rules as `addAssistedMaskStage()`, immediately handing the new
+    /// stage to `onEditObjectMask` so `ObjectMaskEditorOverlay` opens right away — same "not a
+    /// useful state to leave the user in" reasoning, since a `.objectMask` stage with nothing
+    /// selected yet has no mask to show.
+    private func addObjectMaskStage() {
+        let nextIndex = (asset.customStages.map(\.sortIndex).max() ?? -1) + 1
+        let stage: Stage
+        if let stack = asset.stack {
+            stage = Stage(kind: .objectMask, name: "Object Mask \(nextIndex + 1)", stack: stack, sortIndex: nextIndex)
+        } else {
+            stage = Stage(kind: .objectMask, name: "Object Mask \(nextIndex + 1)", asset: asset, sortIndex: nextIndex)
+        }
+        modelContext.insert(stage)
+        selectedStage = stage
+        refreshAndRender()
+        onEditObjectMask(stage)
     }
 
     private func beginRename(_ stage: Stage) {

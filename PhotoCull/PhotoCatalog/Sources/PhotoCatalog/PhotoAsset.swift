@@ -104,6 +104,12 @@ public final class PhotoAsset {
     /// Asset-level, not per-`Stage`, for the same "one repair pass, not a per-stage creative grade"
     /// reasoning as crop/lens correction — see `RawBaseParameters.spotRemoval`'s doc comment.
     public var spotRemovalData: Data?
+    /// JSON-encoded `[ObjectRemoval]` (see `RawEngine`) — AI-removed objects (Vision-selected mask
+    /// plus an already-synthesized Core ML fill), same normalized full-frame convention and
+    /// "nil/empty = no contribution" rule as `spotRemovalData` above. A separate field/list rather
+    /// than folded into `spotRemovalData` — see `ObjectRemoval`'s doc comment on `RawEngine` for why
+    /// it's a distinct type from `SpotRemoval`.
+    public var objectRemovalData: Data?
 
     /// Owns this photo's `.single` stage (always present, index 0) and any `.custom` stages the
     /// user has added. The shared `.scene` stage lives on `PhotoScene` instead — see `Stage`'s

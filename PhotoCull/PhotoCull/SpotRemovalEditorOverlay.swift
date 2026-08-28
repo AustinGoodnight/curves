@@ -28,6 +28,8 @@ struct SpotRemovalEditorOverlay: View {
     /// calling it, Cancel never touched it.
     var onFinished: () -> Void
 
+    @Environment(ColorSchemeStore.self) private var uiColors
+
     /// The unhealed, uncropped base render — see this type's doc comment.
     @State private var previewImage: CGImage?
     /// `previewImage` with every current spot in `spots` composited on top — what's actually shown.
@@ -55,6 +57,8 @@ struct SpotRemovalEditorOverlay: View {
 
     private static let handleHitRadius: CGFloat = 20
     private static let brushRadiusRange: ClosedRange<CGFloat> = 8...120
+    /// Pinch-to-zoom + scroll-to-pan while placing spots — see `ZoomPanState`'s doc comment.
+    @State private var zoomPan = ZoomPanState()
 
     private var imageSize: CGSize {
         guard let previewImage else { return .zero }
@@ -62,47 +66,50 @@ struct SpotRemovalEditorOverlay: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            GeometryReader { geometry in
-                let fitRect = Self.aspectFitRect(imageSize: imageSize, in: geometry.size)
-                ZStack {
-                    if let displayImage {
-                        Image(decorative: displayImage, scale: 1)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                    }
-                    spotHandles(fitRect: fitRect)
-                    if let cursorLocation, dragKind == nil, fitRect.contains(cursorLocation) {
-                        let viewRadius = brushRadius * fitRect.width / max(imageSize.width, 1)
-                        Circle()
-                            .stroke(Color.white, lineWidth: 1.5)
-                            .background(Circle().stroke(Color.black.opacity(0.6), lineWidth: 3).padding(-1))
-                            .frame(width: viewRadius * 2, height: viewRadius * 2)
-                            .position(cursorLocation)
-                            .allowsHitTesting(false)
-                    }
+        GeometryReader { geometry in
+            let baseFitRect = Self.aspectFitRect(imageSize: imageSize, in: geometry.size)
+            let fitRect = zoomPan.apply(to: baseFitRect)
+            ZStack {
+                if let displayImage {
+                    Image(decorative: displayImage, scale: 1)
+                        .resizable()
+                        .frame(width: fitRect.width, height: fitRect.height)
+                        .position(x: fitRect.midX, y: fitRect.midY)
                 }
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .contentShape(Rectangle())
-                .onContinuousHover { phase in
-                    switch phase {
-                    case .active(let location): cursorLocation = location
-                    case .ended: cursorLocation = nil
-                    }
+                spotHandles(fitRect: fitRect)
+                if let cursorLocation, dragKind == nil, fitRect.contains(cursorLocation) {
+                    let viewRadius = brushRadius * fitRect.width / max(imageSize.width, 1)
+                    Circle()
+                        .stroke(Color.white, lineWidth: 1.5)
+                        .background(Circle().stroke(Color.black.opacity(0.6), lineWidth: 3).padding(-1))
+                        .frame(width: viewRadius * 2, height: viewRadius * 2)
+                        .position(cursorLocation)
+                        .allowsHitTesting(false)
                 }
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            cursorLocation = value.location
-                            handleDrag(value: value, fitRect: fitRect)
-                        }
-                        .onEnded { _ in dragKind = nil }
-                )
+                ScrollWheelCatcher { delta in zoomPan.pan(by: delta) }
+                MagnifyCatcher { delta, location in zoomPan.magnify(by: delta, anchor: location, baseFitRect: baseFitRect) }
+                zoomPan.percentPill(containerSize: geometry.size)
             }
-            .padding()
-
-            toolbar
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
+            .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location): cursorLocation = location
+                case .ended: cursorLocation = nil
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        cursorLocation = value.location
+                        handleDrag(value: value, fitRect: fitRect)
+                    }
+                    .onEnded { _ in dragKind = nil }
+            )
         }
+        .padding()
+        .overlay(alignment: .bottom) { toolbar }
         .task(id: asset.filePath) {
             loadGeometry()
             await loadBasePreview()
@@ -145,17 +152,27 @@ struct SpotRemovalEditorOverlay: View {
             Text("Radius")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Slider(value: radiusBinding, in: Self.brushRadiusRange) { Text("Radius") }
-                .frame(width: 140)
-            Spacer()
+            MinimalSlider(
+                value: Binding(get: { Double(radiusBinding.wrappedValue) }, set: { radiusBinding.wrappedValue = CGFloat($0) }),
+                range: Double(Self.brushRadiusRange.lowerBound)...Double(Self.brushRadiusRange.upperBound)
+            )
+            .frame(width: 100)
+            Divider().frame(height: 16)
             Button("Delete Spot") { deleteSelectedSpot() }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
                 .disabled(selectedSpotID == nil)
             Button("Cancel") { onFinished() }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
             Button("Done") { finish() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
+                .foregroundStyle(uiColors.accentColor)
         }
-        .padding(10)
-        .background(.thinMaterial)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.bottom, 10)
     }
 
     /// Doubles as "size of the next new spot" and "size of the selected spot" — matching how

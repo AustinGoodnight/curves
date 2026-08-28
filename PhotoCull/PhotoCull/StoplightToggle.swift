@@ -19,7 +19,7 @@ struct StoplightToggle: View {
         Circle()
             .fill(color)
             .frame(width: diameter, height: diameter)
-            .shadow(color: isOn ? color.opacity(0.7) : .clear, radius: diameter * 0.4)
+            .shadow(color: isOn ? color.opacity(0.35) : .clear, radius: diameter * 0.2)
             .frame(width: diameter + 12, height: diameter + 12)
             .contentShape(Circle())
             .onTapGesture { isOn.toggle() }

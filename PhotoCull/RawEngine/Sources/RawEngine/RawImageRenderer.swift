@@ -173,6 +173,9 @@ public final class RawImageRenderer {
         if let spotRemoval = baseParams.spotRemoval {
             output = SpotRemovalKernel.apply(to: output, params: spotRemoval)
         }
+        if let objectRemovals = baseParams.objectRemovals {
+            output = ObjectRemovalKernel.apply(to: output, params: objectRemovals)
+        }
         if let crop = baseParams.crop {
             output = CropTransform.apply(to: output, params: crop)
         }
@@ -201,6 +204,9 @@ public final class RawImageRenderer {
         }
         if let spotRemoval = baseParams.spotRemoval {
             output = SpotRemovalKernel.apply(to: output, params: spotRemoval)
+        }
+        if let objectRemovals = baseParams.objectRemovals {
+            output = ObjectRemovalKernel.apply(to: output, params: objectRemovals)
         }
         if let crop = baseParams.crop {
             output = CropTransform.apply(to: output, params: crop)

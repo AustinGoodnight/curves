@@ -30,7 +30,14 @@ let package = Package(
         .target(
             name: "RawEngine",
             dependencies: ["COpenImageDenoise"],
-            resources: [.copy("LensCorrection/Resources/db")]
+            resources: [
+                .copy("LensCorrection/Resources/db"),
+                // LaMa (Apache-2.0) inpainting model, converted to Core ML via the open-source
+                // CoreMLaMa script — see Vendor/LaMa-LICENSE.txt and `InpaintingFilter`'s doc
+                // comment. `.process` (not `.copy`) so SwiftPM compiles the .mlpackage to
+                // .mlmodelc at build time, same as Xcode's native Core ML resource handling.
+                .process("Inpainting/Resources/LaMa.mlpackage")
+            ]
         ),
         .testTarget(name: "RawEngineTests", dependencies: ["RawEngine"])
     ]

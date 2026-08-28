@@ -338,6 +338,18 @@ struct ContentView: View {
     /// closes: clicking "Sessions" while editing is what used to be a separate "Done" button.
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        // Replaces the plain `.navigationTitle` text in the window's (hidden-title-bar) toolbar
+        // with the app's own wordmark — `.principal` is the one placement that overrides the
+        // native title text on macOS. The asset is a template image (see its Contents.json) so
+        // it tints via `.foregroundStyle` instead of rendering its own (default-black, invisible
+        // against this app's forced-dark theme) SVG fill.
+        ToolbarItem(placement: .principal) {
+            Image("CurvesWordmark")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: 12)
+                .foregroundStyle(.primary)
+        }
         if detailStore.editingAsset == nil {
             ToolbarItem(placement: .primaryAction) {
                 Button {
