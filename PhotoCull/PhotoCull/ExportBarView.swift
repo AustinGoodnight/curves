@@ -11,12 +11,12 @@ import PhotoCatalog
 /// `store.filteredAssets` as *values* for its own button labels/enabled state, so only this small
 /// view's `body` re-runs when those change, not the whole `GridPane`.
 ///
-/// "Export Selection"/"Export All" use `FilledActionButtonStyle` — the same filled-box look as the
-/// editor's Filmic module toggle and its own Reset All/Export… footer buttons (`EditorFooterActions`)
-/// — per the user's ask that these read as the same primary-action language.
+/// "Export Selection"/"Export All" use `FilledActionButtonStyle`, a shared filled-box "primary
+/// action" look.
 struct ExportBarView: View {
     @Bindable var store: DetailStore
     @Query(sort: \ExportPreset.sortIndex) private var customPresets: [ExportPreset]
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     @State private var selectedSettings: ExportSettings = BuiltInExportPresets.all[0]
     @State private var isShowingPresetManager = false
@@ -55,7 +55,7 @@ struct ExportBarView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(Color.sidebarBackground)
+        .background(uiColors.sidebarBackground)
         .sheet(item: $pendingScope) { scope in
             ExportDestinationSheet(
                 scope: scope,

@@ -45,6 +45,7 @@ struct CullingGridView: View {
     /// visible on screen, so there's never a reason to re-center the scroll view for one; that
     /// behavior only matters for keyboard navigation, which can move focus off-screen.
     @State private var scrollTarget: UUID?
+    @Environment(ColorSchemeStore.self) private var uiColors
     /// Fixed rather than computed from the container width via `GeometryReader` — that measuring
     /// pass turned out to be the actual remaining cause of the large-library click/arrow-key lag
     /// (confirmed by temporarily removing it entirely): `GeometryReader` forces a full second
@@ -89,7 +90,7 @@ struct CullingGridView: View {
                     withAnimation { proxy.scrollTo(newValue, anchor: .center) }
                 }
             }
-            .background(Color.workspaceBackground)
+            .background(uiColors.workspaceBackground)
         }
         .onAppear {
             if selection.isEmpty, let first = clickableIDsInOrder.first {

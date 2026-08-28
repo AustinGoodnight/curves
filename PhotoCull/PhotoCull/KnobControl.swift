@@ -20,6 +20,7 @@ struct KnobControl: View {
     var diameter: CGFloat = 52
 
     @State private var previousDragY: CGFloat? = nil
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     /// Standard hardware-knob sweep: 270° of travel with a 90° gap centered at the bottom (6
     /// o'clock), so the two ends land at roughly 7:30 and 4:30. `trim`'s own angle space starts at
@@ -69,7 +70,7 @@ struct KnobControl: View {
 
             Circle()
                 .trim(from: 0, to: sweepFraction * valueFraction)
-                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .stroke(uiColors.accentColor, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(trackRotation)
 
             Circle()

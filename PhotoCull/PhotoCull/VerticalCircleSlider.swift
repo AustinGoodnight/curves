@@ -34,12 +34,18 @@ struct VerticalCircleSlider: View {
     @Binding var value: Double
     let range: ClosedRange<Double>
     var resetValue: Double? = nil
+    /// `false` (default) draws the glossy circular dot described above. `true` swaps in the same
+    /// rotated-square diamond `MinimalSlider`'s `.diamond` thumb style uses, for faders opting into
+    /// that look (Sharp/Dehaze/Denoise in `ColorBalanceBarView`'s "Detail" group) instead of the dot.
+    var diamondThumb: Bool = false
 
     @State private var previousDragY: CGFloat? = nil
 
     private let trackWidth: CGFloat = 24
     // Recessed inside the track, not overflowing past it — matches `MinimalSlider`'s own thumb.
     private let thumbDiameter: CGFloat = 14
+    /// Matches `MinimalSlider`'s own diamond sizing exactly (`thumbDiameter * 0.72`).
+    private let diamondSide: CGFloat = 14 * 0.72
     private let fineFactor: CGFloat = 0.2
 
     var body: some View {
@@ -59,12 +65,22 @@ struct VerticalCircleSlider: View {
                     )
                     .frame(width: trackWidth)
 
-                Circle()
-                    .fill(thumbFill)
-                    .overlay(Circle().strokeBorder(Color.black.opacity(0.18), lineWidth: 0.75))
-                    .frame(width: thumbDiameter, height: thumbDiameter)
-                    .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
-                    .offset(y: thumbY - thumbDiameter / 2)
+                if diamondThumb {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.white)
+                        .overlay(RoundedRectangle(cornerRadius: 1.5).strokeBorder(Color.black.opacity(0.18), lineWidth: 0.75))
+                        .frame(width: diamondSide, height: diamondSide)
+                        .rotationEffect(.degrees(45))
+                        .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+                        .offset(y: thumbY - diamondSide / 2)
+                } else {
+                    Circle()
+                        .fill(thumbFill)
+                        .overlay(Circle().strokeBorder(Color.black.opacity(0.18), lineWidth: 0.75))
+                        .frame(width: thumbDiameter, height: thumbDiameter)
+                        .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+                        .offset(y: thumbY - thumbDiameter / 2)
+                }
             }
             .contentShape(Rectangle())
             .gesture(

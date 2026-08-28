@@ -83,6 +83,7 @@ struct PhotoThumbnailCell: View {
 
     @State private var thumbnail: CGImage?
     @State private var isHovering = false
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     var body: some View {
         VStack(spacing: 6) {
@@ -106,7 +107,7 @@ struct PhotoThumbnailCell: View {
             .overlay { sceneBorderOverlay }
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(isSelected ? Color.accentColor : .clear, lineWidth: 3)
+                    .stroke(isSelected ? uiColors.accentColor : .clear, lineWidth: 3)
             )
             .overlay(alignment: .topTrailing) { flagBadge }
             .overlay(alignment: .topLeading) { colorDot }

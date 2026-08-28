@@ -22,6 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct PhotoCullApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    /// Live, user-customizable UI chrome colors (Settings' "Appearance" section) — created once
+    /// here and shared with the whole app via `.environment(_:)` below, rather than per-window,
+    /// so every window/scene reads the same live values.
+    @State private var colorSchemeStore = ColorSchemeStore()
     let sharedModelContainer: ModelContainer = {
         let schema = Schema([
             PhotoAsset.self, PhotoStack.self, PhotoScene.self, Session.self, Stage.self, LUT3DPreset.self, AssetVersion.self,
@@ -38,19 +42,22 @@ struct PhotoCullApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                // The whole UI (`Color.workspaceBackground`/`sidebarBackground`, etc. — see
-                // `Color+Workspace.swift`) is a fixed dark palette, not adaptive to the system
-                // appearance. Without forcing the window itself dark, AppKit-drawn chrome (the
-                // toolbar, and especially the menu-bar strip that reveals itself over the window
-                // in fullscreen) falls back to the system's light/dark setting instead, which is
-                // what let fullscreen's toolbar mismatch the rest of the app on a light-mode Mac.
+                // The whole UI (`ColorSchemeStore`'s workspace/sidebar backgrounds, etc.) is a
+                // fixed dark palette, not adaptive to the system appearance. Without forcing the
+                // window itself dark, AppKit-drawn chrome (the toolbar, and especially the
+                // menu-bar strip that reveals itself over the window in fullscreen) falls back to
+                // the system's light/dark setting instead, which is what let fullscreen's toolbar
+                // mismatch the rest of the app on a light-mode Mac.
                 .preferredColorScheme(.dark)
+                .environment(colorSchemeStore)
+                .tint(colorSchemeStore.accentColor)
         }
         .modelContainer(sharedModelContainer)
         .windowStyle(.hiddenTitleBar)
 
         Settings {
             SettingsView()
+                .environment(colorSchemeStore)
         }
     }
 }

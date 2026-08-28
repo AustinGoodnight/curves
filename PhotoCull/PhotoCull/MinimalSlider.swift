@@ -29,8 +29,29 @@ struct MinimalSlider: View {
     /// rest, same "zero reads as neutral" convention the vertical faders/wheels use elsewhere
     /// (`XYWhiteBalanceControl`'s dashed crosshair, `ColorWheelControl`'s arc fill origin).
     var ticks: [Double] = []
+    /// `.capsule` (default) is this control's long-standing look — see the struct doc comment,
+    /// still used by every slider that hasn't opted into `.hairline`. `.hairline` is Exposure/
+    /// Contrast's current pick, a callback to the even-earlier thin-capsule design mentioned there;
+    /// `EditorSidebarView`'s "Slider Styles" comparison row also keeps it alongside `.capsule` for
+    /// the still-open track-style question.
+    var trackStyle: TrackStyle = .capsule
+    /// `.circle` (default) is the "glossy dot" every slider that hasn't opted into `.diamond`
+    /// still uses. `.diamond` won the shape round of `EditorSidebarView`'s "Slider Styles"
+    /// comparison (over circle/triangle/bar, since dropped) and is now live on Exposure/Contrast.
+    var thumbShape: ThumbShape = .circle
+
+    enum TrackStyle {
+        case capsule
+        case hairline
+    }
+
+    enum ThumbShape {
+        case circle
+        case diamond
+    }
 
     @State private var previousDragX: CGFloat? = nil
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     // 24, not 18 — this is the track's actual visible size from before the thumb/fill rework
     // below (a pre-existing framing bug had it rendering at the outer container's height, 24 at
@@ -49,35 +70,11 @@ struct MinimalSlider: View {
             let thumbX = fraction(for: value) * width
 
             ZStack(alignment: .leading) {
-                // A fill *darker* than the surrounding background (`Color.black.opacity(...)`,
-                // not a lighter translucent-white one) — reads as a groove recessed into the
-                // sidebar rather than a lighter panel sitting raised on top of it, same idea for
-                // `VerticalCircleSlider`'s track in `ColorBalanceBarView`. Black-over-anything is
-                // always darker than what's under it, so this works the same regardless of
-                // whether it sits over the sidebar's or the bar's own background color.
-                // Explicit `.frame(height: trackHeight)`, not left to inherit whatever height the
-                // outer container proposes — without it, the track silently rendered at the
-                // *outer* frame's height instead of its own `trackHeight` constant (24pt, back
-                // when the outer frame was sized to the bigger old thumb), so shrinking the thumb
-                // and its outer frame to fit inside the track also shrank the track itself to
-                // match, which wasn't the intent — only the thumb was meant to change size.
-                RoundedRectangle(cornerRadius: trackHeight / 2)
-                    .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
-                    .background(
-                        Color.black.opacity(0.2)
-                            .clipShape(RoundedRectangle(cornerRadius: trackHeight / 2))
-                    )
-                    .frame(height: trackHeight)
-
+                track
                 if !ticks.isEmpty {
                     tickMarks(width: width)
                 }
-
-                Circle()
-                    .fill(thumbFill)
-                    .overlay(Circle().strokeBorder(Color.black.opacity(0.18), lineWidth: 0.75))
-                    .frame(width: thumbDiameter, height: thumbDiameter)
-                    .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+                thumb
                     .offset(x: thumbX - thumbDiameter / 2)
             }
             .contentShape(Rectangle())
@@ -109,6 +106,62 @@ struct MinimalSlider: View {
         // `trackHeight`, not `thumbDiameter` — the thumb sits recessed inside the track, not
         // overflowing past it, so the track determines this control's footprint.
         .frame(height: trackHeight)
+    }
+
+    /// `.capsule`: a fill *darker* than the surrounding background (`uiColors.recessedTrackBackground`,
+    /// a fixed opaque gray, not a lighter translucent-white one) — reads as a groove recessed into
+    /// the sidebar rather than a lighter panel sitting raised on top of it, same idea for
+    /// `VerticalCircleSlider`'s track in `ColorBalanceBarView`, and matches
+    /// `CurveEditorControl`'s own graph fill/border exactly (see that color's own doc comment).
+    /// Explicit `.frame(height: trackHeight)`, not left to inherit whatever height the outer
+    /// container proposes — without it, the track silently rendered at the *outer* frame's height
+    /// instead of its own `trackHeight` constant (24pt, back when the outer frame was sized to the
+    /// bigger old thumb), so shrinking the thumb and its outer frame to fit inside the track also
+    /// shrank the track itself to match, which wasn't the intent — only the thumb was meant to
+    /// change size.
+    ///
+    /// `.hairline`: a thin line instead of a filled groove — same footprint (`trackHeight`, for
+    /// consistent hit-testing/layout across every slider regardless of style) but only a 2pt line
+    /// actually draws, callback to the even-earlier design mentioned in the struct doc comment.
+    @ViewBuilder
+    private var track: some View {
+        switch trackStyle {
+        case .capsule:
+            RoundedRectangle(cornerRadius: trackHeight / 2)
+                .strokeBorder(uiColors.recessedTrackBackground, lineWidth: 1)
+                .background(
+                    uiColors.recessedTrackBackground
+                        .clipShape(RoundedRectangle(cornerRadius: trackHeight / 2))
+                )
+                .frame(height: trackHeight)
+        case .hairline:
+            Capsule()
+                .fill(Color.white.opacity(0.18))
+                .frame(height: 2)
+                .frame(height: trackHeight)
+        }
+    }
+
+    /// One "control dial" shape experiment per `thumbShape` case — `.circle` is the established
+    /// glossy-dot look (`thumbFill`'s off-center radial gradient); the others are flatter, plain
+    /// white for now since they're still being tried rather than adopted.
+    @ViewBuilder
+    private var thumb: some View {
+        switch thumbShape {
+        case .circle:
+            Circle()
+                .fill(thumbFill)
+                .overlay(Circle().strokeBorder(Color.black.opacity(0.18), lineWidth: 0.75))
+                .frame(width: thumbDiameter, height: thumbDiameter)
+                .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+        case .diamond:
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Color.white)
+                .overlay(RoundedRectangle(cornerRadius: 1.5).strokeBorder(Color.black.opacity(0.18), lineWidth: 0.75))
+                .frame(width: thumbDiameter * 0.72, height: thumbDiameter * 0.72)
+                .rotationEffect(.degrees(45))
+                .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+        }
     }
 
     /// A slightly off-center highlight (rather than a flat, uniform white fill) — reads as a

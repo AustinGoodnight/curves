@@ -1,18 +1,21 @@
 import Foundation
 import SwiftData
 
-/// Which of the six roles a `Stage` plays. `.single` and `.scene` are structural — every
+/// Which of the seven roles a `Stage` plays. `.single` and `.scene` are structural — every
 /// `PhotoAsset`/`PhotoScene` has exactly one, created alongside its owner and never deleted or
-/// renamed. `.custom`, `.assistedMask`, `.linearGradientMask`, and `.radialGradientMask` stages are
-/// freely added/removed/renamed by the user and share one `sortIndex` sequence (see
-/// `PhotoAsset.customStages`'s doc comment). The three mask kinds all differ from `.custom` only in
-/// how `maskData` gets populated: `.assistedMask` via the assisted mask editor (rough brush strokes
-/// refined to the photo's own edges by a guided filter — see `GuidedMaskRefiner` in the app
-/// target); `.linearGradientMask`/`.radialGradientMask` via `GradientMaskEditorOverlay`, which also
-/// keeps the gradient's geometry on `gradientStartX`/etc. so it stays live-editable ("Adjust
-/// Gradient…") instead of only being a baked raster like the other two mask kinds. A stack doesn't
-/// get its own kind — see `PhotoStack.stages`'s doc comment for why a stacked photo's `.single`/
-/// `.custom`/mask stages are the *same kind*, just owned by the stack instead of the asset.
+/// renamed. `.custom`, `.assistedMask`, `.linearGradientMask`, `.radialGradientMask`, and
+/// `.colorRangeMask` stages are freely added/removed/renamed by the user and share one `sortIndex`
+/// sequence (see `PhotoAsset.customStages`'s doc comment). The four mask kinds all differ from
+/// `.custom` only in how `maskData` gets populated: `.assistedMask` via the assisted mask editor
+/// (rough brush strokes refined to the photo's own edges by a guided filter — see
+/// `GuidedMaskRefiner` in the app target); `.linearGradientMask`/`.radialGradientMask` via
+/// `GradientMaskEditorOverlay`, which also keeps the gradient's geometry on `gradientStartX`/etc. so
+/// it stays live-editable ("Adjust Gradient…") instead of only being a baked raster like the other
+/// mask kinds; `.colorRangeMask` via `ColorRangeMaskEditorOverlay` (click-to-sample a color, then
+/// threshold/feather select every pixel near it), which similarly keeps its own parameters on
+/// `colorRangeRed`/etc. for the same "Adjust…" live-reedit reason. A stack doesn't get its own kind
+/// — see `PhotoStack.stages`'s doc comment for why a stacked photo's `.single`/`.custom`/mask stages
+/// are the *same kind*, just owned by the stack instead of the asset.
 public enum StageKind: Int, Codable, Sendable {
     case single = 0
     case scene = 1
@@ -20,6 +23,7 @@ public enum StageKind: Int, Codable, Sendable {
     case assistedMask = 3
     case linearGradientMask = 4
     case radialGradientMask = 5
+    case colorRangeMask = 6
 
     /// Whether this kind belongs to the user-managed `.custom`-style sequence (freely added,
     /// renamed, deleted, ordered by `sortIndex`) rather than being structural like `.single`/
@@ -37,6 +41,7 @@ public enum StageKind: Int, Codable, Sendable {
         case .assistedMask: return "wand.and.stars"
         case .linearGradientMask: return "rectangle.righthalf.filled"
         case .radialGradientMask: return "target"
+        case .colorRangeMask: return "eyedropper"
         case .single, .scene, .custom: return nil
         }
     }
@@ -108,6 +113,23 @@ public final class Stage {
     public var gradientFeather: Double?
     /// Both kinds: flips which side of the gradient is fully affected vs. fully protected.
     public var gradientInverted: Bool?
+
+    /// Sampled target color for `.colorRangeMask` stages, `nil` for every other kind — linear 0–1
+    /// components, matching the working-space convention `ColorRangeMaskEditorOverlay` samples the
+    /// preview `CGImage` in. Kept alongside the baked `maskData` raster for the same "Adjust…"
+    /// live-reedit reason as `gradientStartX`/etc. above; the render pipeline only ever reads
+    /// `maskData`.
+    public var colorRangeRed: Double?
+    public var colorRangeGreen: Double?
+    public var colorRangeBlue: Double?
+    /// Normalized (0–1) color-distance a pixel can be from the sampled target and still count as
+    /// fully selected.
+    public var colorRangeThreshold: Double?
+    /// Normalized (0–1) width of the soft falloff band beyond `colorRangeThreshold`, same role as
+    /// `gradientFeather` above.
+    public var colorRangeFeather: Double?
+    /// Flips which pixels are fully selected vs. fully excluded, same role as `gradientInverted`.
+    public var colorRangeInverted: Bool?
 
     /// `nil` means no haze removal — see `DehazeKernel`/`DehazeParameters` in `RawEngine`. No
     /// separate `editDehazeEnabled` switch of its *own* — `nil`/0 is already a true no-op — but its

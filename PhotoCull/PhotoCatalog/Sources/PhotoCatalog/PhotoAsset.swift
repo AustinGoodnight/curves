@@ -98,6 +98,13 @@ public final class PhotoAsset {
     public var editCropRectWidth: Double?
     public var editCropRectHeight: Double?
 
+    /// JSON-encoded `[SpotRemoval]` (see `RawEngine`) — healed/cloned spots, in normalized
+    /// coordinates of the full, unrotated, uncropped image frame. `nil` or an empty decoded array
+    /// both mean "no spots", same "no contribution" convention as the crop fields above.
+    /// Asset-level, not per-`Stage`, for the same "one repair pass, not a per-stage creative grade"
+    /// reasoning as crop/lens correction — see `RawBaseParameters.spotRemoval`'s doc comment.
+    public var spotRemovalData: Data?
+
     /// Owns this photo's `.single` stage (always present, index 0) and any `.custom` stages the
     /// user has added. The shared `.scene` stage lives on `PhotoScene` instead — see `Stage`'s
     /// doc comment.

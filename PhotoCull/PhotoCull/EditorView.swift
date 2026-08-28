@@ -17,6 +17,7 @@ struct EditorView: View {
     var onSelectAsset: (PhotoAsset) -> Void
 
     @State private var coordinator = EditorRenderCoordinator()
+    @Environment(ColorSchemeStore.self) private var uiColors
     /// Cmd+Z/Cmd+Shift+Z undo/redo for value-level edits — see `EditHistory`'s doc comment for
     /// scope. Seeded in `init` with this asset's starting values so the very first edit diffs
     /// against the right baseline, and re-seeded in the `.task(id:)` below on every photo switch.
@@ -42,23 +43,21 @@ struct EditorView: View {
     /// editor instead of the brush one; the two are mutually exclusive in practice since only one
     /// "Edit"/"Adjust" action can be in flight at a time.
     @State private var gradientEditingStage: Stage?
+    /// Set while `ColorRangeMaskEditorOverlay` is open for a `.colorRangeMask` stage — same role as
+    /// `gradientEditingStage`, just for the color-sampling editor instead.
+    @State private var colorRangeEditingStage: Stage?
     /// Set while `CropEditorOverlay` is open — same role as `gradientEditingStage`, just asset-level
     /// (crop/straighten isn't per-`Stage`, see `CropParameters`'s doc comment) so a plain `Bool`
     /// rather than an optional `Stage`.
     @State private var cropEditing = false
+    /// Set while `SpotRemovalEditorOverlay` is open — same role as `cropEditing`, just for
+    /// blemish/dust-spot healing instead of crop (also asset-level, see `SpotRemoval`'s doc comment
+    /// on `RawEngine`).
+    @State private var spotRemovalEditing = false
     /// Which of `previewBackgroundPalette` the preview pane's backdrop currently shows — purely a
     /// viewing aid (checking how the image reads against different surrounds), not part of the
     /// edit itself, so this is plain local `@State`, not persisted or threaded into `scheduleRender`.
     @State private var previewBackgroundColor: Color = .editorPreviewBackground
-
-    /// Alternatives to `Color.editorPreviewBackground`'s own neutral gray — a small fixed spread
-    /// from black to white (plus the default itself) rather than a full color picker, since the
-    /// point is judging exposure/contrast against different *neutral* surrounds (the same reason
-    /// `editorPreviewBackground` itself isn't pure black — see its own doc comment), not
-    /// decorating the workspace.
-    private let previewBackgroundPalette: [Color] = [
-        .editorPreviewBackground, .black, Color(white: 0.15), Color(white: 0.35), Color(white: 0.65), .white,
-    ]
 
     init(asset: PhotoAsset, onSelectAsset: @escaping (PhotoAsset) -> Void) {
         self.asset = asset
@@ -83,7 +82,7 @@ struct EditorView: View {
                     onSelectAsset: onSelectAsset,
                     onEditMask: { maskEditingStage = $0 },
                     onEditGradientMask: { gradientEditingStage = $0 },
-                    onEditCrop: { cropEditing = true }
+                    onEditColorRangeMask: { colorRangeEditingStage = $0 }
                 )
                 .frame(minWidth: 160, idealWidth: 200, maxWidth: 280)
 
@@ -107,6 +106,15 @@ struct EditorView: View {
                                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                             }
                         )
+                    } else if let colorRangeEditingStage, let previewImage = coordinator.previewImage {
+                        ColorRangeMaskEditorOverlay(
+                            stage: colorRangeEditingStage,
+                            previewImage: previewImage,
+                            onFinished: {
+                                self.colorRangeEditingStage = nil
+                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                            }
+                        )
                     } else if cropEditing, coordinator.isReady {
                         CropEditorOverlay(
                             asset: asset,
@@ -114,6 +122,16 @@ struct EditorView: View {
                             coordinator: coordinator,
                             onFinished: {
                                 cropEditing = false
+                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                            }
+                        )
+                    } else if spotRemovalEditing, coordinator.isReady {
+                        SpotRemovalEditorOverlay(
+                            asset: asset,
+                            activeStages: activeStages,
+                            coordinator: coordinator,
+                            onFinished: {
+                                spotRemovalEditing = false
                                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                             }
                         )
@@ -128,7 +146,7 @@ struct EditorView: View {
                 }
                 .frame(minWidth: 480, minHeight: 400)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .topLeading) { previewBackgroundPaletteRow }
+                .overlay(alignment: .top) { previewOverlayToolbar }
 
                 EditorSidebarView(asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator, history: history)
             }
@@ -155,14 +173,56 @@ struct EditorView: View {
         }
     }
 
-    /// Small clickable swatches over the preview pane's top-left corner — tapping one sets
+    /// Micro toolbar floating on the preview pane's own background, centered above the image —
+    /// groups the two "how am I viewing this" controls that aren't part of any `Stage`'s edit
+    /// values: crop/straighten (asset-level, see `cropEditing`'s doc comment) and the preview
+    /// backdrop swatches. Deliberately an overlay on the `ZStack`'s background rather than a real
+    /// toolbar row (which would take layout space above the image and shrink it) — `.thinMaterial`
+    /// matches this file's other floating chrome (the zoom-percent pill in `ZoomableImagePane`).
+    private var previewOverlayToolbar: some View {
+        HStack(spacing: 10) {
+            Button {
+                cropEditing = true
+            } label: {
+                Image(systemName: "crop.rotate")
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(cropHasAdjustments(asset) ? uiColors.accentColor : .primary)
+            .help(cropHasAdjustments(asset) ? "Adjust Crop & Straighten…" : "Crop & Straighten…")
+
+            Button {
+                spotRemovalEditing = true
+            } label: {
+                Image(systemName: "bandage")
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(spotRemovalHasAdjustments(asset) ? uiColors.accentColor : .primary)
+            .help(spotRemovalHasAdjustments(asset) ? "Adjust Spot Removal…" : "Spot Removal…")
+
+            Divider().frame(height: 16)
+
+            previewBackgroundPaletteRow
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.top, 10)
+    }
+
+    /// Small clickable swatches, part of `previewOverlayToolbar` — tapping one sets
     /// `previewBackgroundColor`; the currently-active swatch gets an accent-colored ring so it's
-    /// clear which surround is showing. Kept small and tucked in a corner rather than in the
-    /// toolbar since this is a minor viewing aid, not a primary edit control.
+    /// clear which surround is showing. The 6 swatches themselves
+    /// (`uiColors.previewBackgroundPalette`) are user-customizable in Settings — a small fixed
+    /// spread from black to white by default rather than a full color picker here, since the point
+    /// is judging exposure/contrast against different *neutral* surrounds (the same reason
+    /// `editorPreviewBackground` itself isn't pure black — see its own doc comment), not decorating
+    /// the workspace.
     private var previewBackgroundPaletteRow: some View {
         HStack(spacing: 6) {
-            ForEach(previewBackgroundPalette.indices, id: \.self) { i in
-                let color = previewBackgroundPalette[i]
+            ForEach(uiColors.previewBackgroundPalette.indices, id: \.self) { i in
+                let color = uiColors.previewBackgroundPalette[i]
                 Button {
                     previewBackgroundColor = color
                 } label: {
@@ -172,7 +232,7 @@ struct EditorView: View {
                         .overlay(
                             RoundedRectangle(cornerRadius: 4)
                                 .strokeBorder(
-                                    previewBackgroundColor == color ? Color.accentColor : Color.white.opacity(0.25),
+                                    previewBackgroundColor == color ? uiColors.accentColor : Color.white.opacity(0.25),
                                     lineWidth: previewBackgroundColor == color ? 2 : 1
                                 )
                         )
@@ -180,7 +240,6 @@ struct EditorView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(10)
     }
 
     /// Sized so the puck circle's own *bottom edge* lands at the same height as the fader bar's

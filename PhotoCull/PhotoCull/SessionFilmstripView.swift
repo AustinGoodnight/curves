@@ -28,6 +28,7 @@ struct CompactPhotoThumbnail: View {
     var size: CGFloat = 96
 
     @State private var thumbnail: CGImage?
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     var body: some View {
         ZStack {
@@ -44,7 +45,7 @@ struct CompactPhotoThumbnail: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(isCurrent ? Color.accentColor : .clear, lineWidth: 3)
+                .stroke(isCurrent ? uiColors.accentColor : .clear, lineWidth: 3)
         )
         .task(id: asset.filePath) {
             thumbnail = await loadCachedThumbnail(for: asset)
@@ -63,6 +64,7 @@ private struct FilmstripThumbnail: View {
     let stackCount: Int
 
     @State private var thumbnail: CGImage?
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     /// From the *loaded thumbnail's* own pixel dimensions, not `asset.pixelWidth`/`pixelHeight` —
     /// those are the raw sensor buffer's dimensions and ignore the shot's EXIF orientation, so a
@@ -92,7 +94,7 @@ private struct FilmstripThumbnail: View {
         .clipShape(RoundedRectangle(cornerRadius: 5))
         .overlay {
             if isCurrent {
-                RoundedRectangle(cornerRadius: 5).stroke(Color.accentColor, lineWidth: 3)
+                RoundedRectangle(cornerRadius: 5).stroke(uiColors.accentColor, lineWidth: 3)
             }
         }
         .overlay(alignment: .bottomLeading) { stackBadge }
@@ -124,6 +126,7 @@ private struct FilmstripThumbnail: View {
 struct SessionFilmstripView: View {
     let asset: PhotoAsset
     var onSelectAsset: (PhotoAsset) -> Void
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     /// One entry per *shot*, not per photo — a stack collapses to a single thumbnail here (with a
     /// count badge, see `FilmstripThumbnail.stackBadge`), same as the main grid's stack cover, since
@@ -179,6 +182,6 @@ struct SessionFilmstripView: View {
             }
         }
         .frame(minWidth: 130, idealWidth: 150, maxWidth: 200)
-        .background(Color.sidebarBackground)
+        .background(uiColors.sidebarBackground)
     }
 }

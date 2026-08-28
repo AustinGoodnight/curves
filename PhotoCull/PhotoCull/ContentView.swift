@@ -30,6 +30,10 @@ import PhotoCatalog
 ///    reads the property lazily, at the point it's actually used.**
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    /// Live, user-customizable UI chrome colors — see `ColorSchemeStore`'s doc comment. A plain
+    /// Observable read, not `@Query`, so reading it directly in `body`/`toolbarContent` is safe
+    /// (it only actually changes when the user edits Settings, unlike `allAssets` above).
+    @Environment(ColorSchemeStore.self) private var uiColors
     @Query(sort: \PhotoAsset.captureDate, order: .reverse) private var allAssets: [PhotoAsset]
     @Query(sort: \PhotoScene.name) private var scenes: [PhotoScene]
     @Query(sort: \Session.createdDate, order: .reverse) private var sessions: [Session]
@@ -129,10 +133,10 @@ struct ContentView: View {
             detailContent
                 .navigationTitle(detailStore.editingAsset?.fileName ?? selectedScene?.name ?? selectedSession?.name ?? "PhotoCull")
                 .toolbar { toolbarContent }
-                .toolbarBackground(Color.sidebarBackground, for: .windowToolbar)
+                .toolbarBackground(uiColors.sidebarBackground, for: .windowToolbar)
                 .toolbarBackground(.visible, for: .windowToolbar)
         }
-        .background(WindowBackgroundConfigurator())
+        .background(WindowBackgroundConfigurator(color: uiColors.sidebarBackground))
         .background {
             Button("Add Selected to Scene") {
                 guard detailStore.commonSessionForSelection != nil else { return }
@@ -440,7 +444,7 @@ struct ContentView: View {
                 StageFieldSnapshot.applyDefaultIfAvailable(to: asset.singleStage, context: modelContext)
             }
             let count = imported.count
-            importStatus = "Imported \(count) new file\(count == 1 ? "" : "s") (\(files.count) RAW file\(files.count == 1 ? "" : "s") found)."
+            importStatus = "Imported \(count) new file\(count == 1 ? "" : "s") (\(files.count) file\(files.count == 1 ? "" : "s") found)."
             refreshFilteredAssets()
         } catch {
             importStatus = "Import failed: \(error.localizedDescription)"
@@ -601,6 +605,11 @@ private final class RecursiveImportOption {
 /// re-applies on every SwiftUI update pass so a window-recreation (fullscreen/Space changes on some
 /// macOS versions do this) can't silently drop the override again.
 private struct WindowBackgroundConfigurator: NSViewRepresentable {
+    /// Passed in from `ContentView` (`colorScheme.sidebarBackground`) rather than read as a fixed
+    /// constant — `updateNSView` already re-applies on every SwiftUI update pass (see below), so a
+    /// live Settings change to the sidebar color reaches the window chrome the same way.
+    let color: Color
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         apply(to: view, attempt: 0)
@@ -621,6 +630,6 @@ private struct WindowBackgroundConfigurator: NSViewRepresentable {
         }
         window.appearance = NSAppearance(named: .darkAqua)
         window.titlebarAppearsTransparent = true
-        window.backgroundColor = NSColor(Color.sidebarBackground)
+        window.backgroundColor = NSColor(color)
     }
 }

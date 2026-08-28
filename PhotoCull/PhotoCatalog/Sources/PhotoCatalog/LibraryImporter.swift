@@ -18,7 +18,7 @@ public final class LibraryImporter {
             options: options
         ) else { return [] }
 
-        for case let fileURL as URL in enumerator where RawFileType.isRaw(fileURL) {
+        for case let fileURL as URL in enumerator where RawFileType.isSupportedImage(fileURL) {
             results.append(fileURL)
         }
         return results

@@ -60,6 +60,13 @@ struct StageFieldSnapshot: Codable, Equatable {
     var gradientFeather: Double?
     var gradientInverted: Bool?
 
+    var colorRangeRed: Double?
+    var colorRangeGreen: Double?
+    var colorRangeBlue: Double?
+    var colorRangeThreshold: Double?
+    var colorRangeFeather: Double?
+    var colorRangeInverted: Bool?
+
     init(capturing stage: Stage) {
         editDehazeAmount = stage.editDehazeAmount
 
@@ -113,6 +120,13 @@ struct StageFieldSnapshot: Codable, Equatable {
         gradientRadius = stage.gradientRadius
         gradientFeather = stage.gradientFeather
         gradientInverted = stage.gradientInverted
+
+        colorRangeRed = stage.colorRangeRed
+        colorRangeGreen = stage.colorRangeGreen
+        colorRangeBlue = stage.colorRangeBlue
+        colorRangeThreshold = stage.colorRangeThreshold
+        colorRangeFeather = stage.colorRangeFeather
+        colorRangeInverted = stage.colorRangeInverted
     }
 
     func apply(to stage: Stage) {
@@ -168,6 +182,13 @@ struct StageFieldSnapshot: Codable, Equatable {
         stage.gradientRadius = gradientRadius
         stage.gradientFeather = gradientFeather
         stage.gradientInverted = gradientInverted
+
+        stage.colorRangeRed = colorRangeRed
+        stage.colorRangeGreen = colorRangeGreen
+        stage.colorRangeBlue = colorRangeBlue
+        stage.colorRangeThreshold = colorRangeThreshold
+        stage.colorRangeFeather = colorRangeFeather
+        stage.colorRangeInverted = colorRangeInverted
     }
 }
 
@@ -253,6 +274,12 @@ extension StageFieldSnapshot {
         result.gradientRadius = nil
         result.gradientFeather = nil
         result.gradientInverted = nil
+        result.colorRangeRed = nil
+        result.colorRangeGreen = nil
+        result.colorRangeBlue = nil
+        result.colorRangeThreshold = nil
+        result.colorRangeFeather = nil
+        result.colorRangeInverted = nil
         self = result
     }
 
@@ -295,7 +322,10 @@ extension StageFieldSnapshot {
         }
         if maskData != other.maskData || gradientStartX != other.gradientStartX || gradientStartY != other.gradientStartY
             || gradientEndX != other.gradientEndX || gradientEndY != other.gradientEndY || gradientRadius != other.gradientRadius
-            || gradientFeather != other.gradientFeather || gradientInverted != other.gradientInverted {
+            || gradientFeather != other.gradientFeather || gradientInverted != other.gradientInverted
+            || colorRangeRed != other.colorRangeRed || colorRangeGreen != other.colorRangeGreen || colorRangeBlue != other.colorRangeBlue
+            || colorRangeThreshold != other.colorRangeThreshold || colorRangeFeather != other.colorRangeFeather
+            || colorRangeInverted != other.colorRangeInverted {
             changed.insert("Mask")
         }
         return changed

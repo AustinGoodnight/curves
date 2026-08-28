@@ -10,6 +10,11 @@ import Foundation
 /// not per render.
 public final class RawImageRenderer {
     private var filter: CIRAWFilter?
+    /// Decoded source for a non-RAW asset (JPEG/PNG/HEIC/TIFF) — set instead of `filter` whenever
+    /// `CIRAWFilter` can't open the file. There's no as-shot exposure/white-balance/sharpness
+    /// metadata to read back for these formats, so `apply(_:)` (which only ever touches `filter`)
+    /// is a no-op on this path and those base params stay at their neutral defaults below.
+    private var standardImage: CIImage?
     private var loadedURL: URL?
     private let context: CIContext
 
@@ -25,22 +30,39 @@ public final class RawImageRenderer {
         context = CIContext()
     }
 
-    /// Loads the RAW file and captures its as-shot defaults. Returns false if the file couldn't
-    /// be decoded. Safe to call from a background thread — the initial full decode is the ~1.5s
-    /// operation validated for this pipeline, so callers should not do this on the main thread.
+    /// Loads the image and captures its as-shot defaults. Tries `CIRAWFilter` first (the RAW
+    /// decode path); if the file isn't a RAW format `CIRAWFilter` recognizes, falls back to a
+    /// plain `CIImage(contentsOf:)` decode so standard formats (JPEG/PNG/HEIC/TIFF) still load.
+    /// Returns false if neither decode succeeds. Safe to call from a background thread — the
+    /// initial full RAW decode is the ~1.5s operation validated for this pipeline, so callers
+    /// should not do this on the main thread.
     @discardableResult
     public func load(url: URL) -> Bool {
-        if loadedURL == url, filter != nil { return true }
-        guard let newFilter = CIRAWFilter(imageURL: url) else { return false }
-        filter = newFilter
+        if loadedURL == url, filter != nil || standardImage != nil { return true }
+        if let newFilter = CIRAWFilter(imageURL: url) {
+            filter = newFilter
+            standardImage = nil
+            loadedURL = url
+            nativeSize = newFilter.nativeSize
+            defaultExposure = Double(newFilter.exposure)
+            defaultBoostAmount = Double(newFilter.boostAmount)
+            defaultNeutralTemperature = Double(newFilter.neutralTemperature)
+            defaultNeutralTint = Double(newFilter.neutralTint)
+            isSharpnessSupported = newFilter.isSharpnessSupported
+            defaultSharpnessAmount = Double(newFilter.sharpnessAmount)
+            return true
+        }
+        guard let image = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else { return false }
+        filter = nil
+        standardImage = image
         loadedURL = url
-        nativeSize = newFilter.nativeSize
-        defaultExposure = Double(newFilter.exposure)
-        defaultBoostAmount = Double(newFilter.boostAmount)
-        defaultNeutralTemperature = Double(newFilter.neutralTemperature)
-        defaultNeutralTint = Double(newFilter.neutralTint)
-        isSharpnessSupported = newFilter.isSharpnessSupported
-        defaultSharpnessAmount = Double(newFilter.sharpnessAmount)
+        nativeSize = image.extent.size
+        defaultExposure = 0
+        defaultBoostAmount = 1
+        defaultNeutralTemperature = 6500
+        defaultNeutralTint = 0
+        isSharpnessSupported = false
+        defaultSharpnessAmount = 0
         return true
     }
 
@@ -107,6 +129,28 @@ public final class RawImageRenderer {
         return blend.outputImage?.cropped(to: image.extent)
     }
 
+    /// Runs the format-specific decode step shared by `renderPreview`/`renderFullResolution`:
+    /// applies `baseParams` to `filter` (a no-op on the `standardImage` path — see its doc
+    /// comment) and returns the resulting `CIImage`, downscaling `CIRAWFilter`'s demosaic itself
+    /// via `scaleFactor` when `maxPixelSize` is given (see `renderPreview`'s doc comment for why
+    /// that only makes sense on the RAW path — a decoded JPEG/PNG is already close to display
+    /// size, so it's scaled at the tail end like every other format instead).
+    private func decodedImage(baseParams: RawBaseParameters, maxPixelSize: CGFloat?, draft: Bool) -> CIImage? {
+        guard filter != nil || standardImage != nil else { return nil }
+        apply(baseParams)
+        if let filter {
+            if let maxPixelSize {
+                let longestNative = max(nativeSize.width, nativeSize.height)
+                filter.scaleFactor = longestNative > 0 ? Float(min(1, maxPixelSize / longestNative)) : 1
+            } else {
+                filter.scaleFactor = 1
+            }
+            filter.isDraftModeEnabled = draft
+            return filter.outputImage
+        }
+        return standardImage
+    }
+
     /// Renders a preview downscaled to fit within `maxPixelSize` on its longest side.
     ///
     /// Sets `CIRAWFilter.scaleFactor` so the demosaic itself runs at roughly preview resolution
@@ -116,12 +160,7 @@ public final class RawImageRenderer {
     /// quality for speed — pass `true` while the user is actively dragging a control, `false` once
     /// input has settled for a crisper pass.
     public func renderPreview(baseParams: RawBaseParameters, stageStack: [StageParameters], maxPixelSize: CGFloat, draft: Bool = false) -> CGImage? {
-        guard let filter else { return nil }
-        apply(baseParams)
-        let longestNative = max(nativeSize.width, nativeSize.height)
-        filter.scaleFactor = longestNative > 0 ? Float(min(1, maxPixelSize / longestNative)) : 1
-        filter.isDraftModeEnabled = draft
-        guard var output = filter.outputImage else { return nil }
+        guard var output = decodedImage(baseParams: baseParams, maxPixelSize: maxPixelSize, draft: draft) else { return nil }
         if let denoise = baseParams.denoise {
             output = DenoiseFilter.apply(to: output, params: denoise, draft: draft)
         }
@@ -130,6 +169,9 @@ public final class RawImageRenderer {
         }
         for stage in stageStack where !stage.isEmpty {
             output = applyStage(stage, to: output)
+        }
+        if let spotRemoval = baseParams.spotRemoval {
+            output = SpotRemovalKernel.apply(to: output, params: spotRemoval)
         }
         if let crop = baseParams.crop {
             output = CropTransform.apply(to: output, params: crop)
@@ -147,11 +189,7 @@ public final class RawImageRenderer {
     /// than before it, so a resized export still benefits from filtering/grading computed at full
     /// detail instead of at the smaller output size.
     public func renderFullResolution(baseParams: RawBaseParameters, stageStack: [StageParameters], maxLongEdge: CGFloat? = nil) -> CGImage? {
-        guard let filter else { return nil }
-        apply(baseParams)
-        filter.scaleFactor = 1
-        filter.isDraftModeEnabled = false
-        guard var output = filter.outputImage else { return nil }
+        guard var output = decodedImage(baseParams: baseParams, maxPixelSize: nil, draft: false) else { return nil }
         if let denoise = baseParams.denoise {
             output = DenoiseFilter.apply(to: output, params: denoise, draft: false)
         }
@@ -160,6 +198,9 @@ public final class RawImageRenderer {
         }
         for stage in stageStack where !stage.isEmpty {
             output = applyStage(stage, to: output)
+        }
+        if let spotRemoval = baseParams.spotRemoval {
+            output = SpotRemovalKernel.apply(to: output, params: spotRemoval)
         }
         if let crop = baseParams.crop {
             output = CropTransform.apply(to: output, params: crop)

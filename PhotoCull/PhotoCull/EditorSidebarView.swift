@@ -23,6 +23,7 @@ struct EditorSidebarView: View {
     let activeStages: [Stage]
     let coordinator: EditorRenderCoordinator
     let history: EditHistory
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     /// Purely local UI state, not persisted: reopening the editor always starts closed, since
     /// "most of the time I leave it at default" was the whole reason for hiding these behind a
@@ -80,14 +81,16 @@ struct EditorSidebarView: View {
                 // `colorBalanceSection` instead (vertical faders next to the wheels) since those
                 // read as color controls, not tone.
                 section("Exposure") {
+                    // `trackStyle: .hairline, thumbShape: .diamond` — the "Hairline · Diamond"
+                    // style picked from the comparison row below, now live on the real controls.
                     slider(
                         "Exposure", value: bind(\.editExposure, fallback: coordinator.renderer.defaultExposure),
                         range: -4...4, resetValue: coordinator.renderer.defaultExposure,
-                        ticks: [-4, -3, -2, -1, 0, 1, 2, 3, 4]
+                        ticks: [-4, -3, -2, -1, 0, 1, 2, 3, 4], trackStyle: .hairline, thumbShape: .diamond
                     )
                     slider(
                         "Contrast", value: stageBind(\.editColorBalanceContrast, fallback: 0, module: colorBalanceGate), range: -0.5...0.5,
-                        ticks: [-0.5, -0.25, 0, 0.25, 0.5]
+                        ticks: [-0.5, -0.25, 0, 0.25, 0.5], trackStyle: .hairline, thumbShape: .diamond
                     )
                 }
                 // The big "Filmic" area toggles the module on/off (unchanged); the chevron is a
@@ -150,11 +153,14 @@ struct EditorSidebarView: View {
                         .frame(width: 260)
                     }
                 }
-                .foregroundStyle(stage.editFilmicEnabled ? Color.accentColor : Color.secondary)
-                .background(
-                    stage.editFilmicEnabled ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.06),
-                    in: RoundedRectangle(cornerRadius: 8)
-                )
+                .foregroundStyle(stage.editFilmicEnabled ? uiColors.accentColor : Color.secondary)
+                // `uiColors.recessedTrackBackground` — the same fixed dark fill every slider track
+                // and the Curve graph use, replacing the old accent-tinted/plain-primary fills so
+                // this button reads as one more recessed panel in the same family instead of its
+                // own, differently-styled control. Enabled/disabled still comes through via the
+                // text color above, matching how every other module's `StoplightToggle` row keeps
+                // its background neutral and puts the on/off signal in the toggle itself.
+                .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 10) {
                     // Three independent regions, same technique as `ColorBalanceBarView.colorZonesSection`'s
                     // own header — "Curve" + reset pinned leading, "Preserve Color" truly centered on the
@@ -216,11 +222,10 @@ struct EditorSidebarView: View {
                         range: 0...0.15, resetValue: 0, ticks: [0, 0.05, 0.1, 0.15]
                     )
                 }
-                EditorFooterActions(asset: asset, stage: stage, activeStages: activeStages, coordinator: coordinator, history: history)
             }
             .padding()
         }
-        .background(Color.sidebarBackground)
+        .background(uiColors.sidebarBackground)
         .toggleStyle(.switch)
         .disabled(!coordinator.isReady)
     }

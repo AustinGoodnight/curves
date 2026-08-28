@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Small view builders shared across the editor's control clusters (`EditorSidebarView`,
-/// `ColorBalanceBarView`, `EditorFooterActions`). Free functions rather than methods on any one
-/// view, since more than one of those clusters uses them.
+/// `ColorBalanceBarView`). Free functions rather than methods on any one view, since more than one
+/// of those clusters uses them.
 
 func resetButton(disabled: Bool, action: @escaping () -> Void) -> some View {
     Button(action: action) {
@@ -66,7 +66,10 @@ func section<Content: View>(
 /// `resetValue` is what double-clicking the slider sets it to — pass the same value used as the
 /// binding's own fallback wherever that fallback isn't 0 (`MinimalSlider`'s default), e.g. a
 /// camera-dependent default like `coordinator.renderer.defaultExposure`.
-func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, resetValue: Double? = nil, ticks: [Double] = []) -> some View {
+func slider(
+    _ title: String, value: Binding<Double>, range: ClosedRange<Double>, resetValue: Double? = nil, ticks: [Double] = [],
+    trackStyle: MinimalSlider.TrackStyle = .capsule, thumbShape: MinimalSlider.ThumbShape = .circle
+) -> some View {
     VStack(alignment: .leading, spacing: 4) {
         HStack {
             Text(title)
@@ -80,7 +83,7 @@ func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>,
                 .padding(.vertical, 2)
                 .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
         }
-        MinimalSlider(value: value, range: range, resetValue: resetValue, ticks: ticks)
+        MinimalSlider(value: value, range: range, resetValue: resetValue, ticks: ticks, trackStyle: trackStyle, thumbShape: thumbShape)
     }
 }
 
@@ -107,14 +110,15 @@ func verticalGradientSlider(
     gradient: Gradient,
     valueText: String,
     trackHeight: CGFloat = colorFaderTrackHeight,
-    resetValue: Double? = nil
+    resetValue: Double? = nil,
+    diamondThumb: Bool = false
 ) -> some View {
     VStack(spacing: 8) {
         Text(title)
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize()
-        VerticalGradientSlider(value: value, range: range, gradient: gradient, resetValue: resetValue)
+        VerticalGradientSlider(value: value, range: range, gradient: gradient, resetValue: resetValue, diamondThumb: diamondThumb)
             .frame(height: trackHeight)
         if !valueText.isEmpty {
             Text(valueText)
@@ -172,14 +176,15 @@ func verticalCircleSlider(
     range: ClosedRange<Double>,
     valueText: String,
     trackHeight: CGFloat = colorFaderTrackHeight,
-    resetValue: Double? = nil
+    resetValue: Double? = nil,
+    diamondThumb: Bool = false
 ) -> some View {
     VStack(spacing: 8) {
         Text(title)
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize()
-        VerticalCircleSlider(value: value, range: range, resetValue: resetValue)
+        VerticalCircleSlider(value: value, range: range, resetValue: resetValue, diamondThumb: diamondThumb)
             .frame(height: trackHeight)
         if !valueText.isEmpty {
             Text(valueText)

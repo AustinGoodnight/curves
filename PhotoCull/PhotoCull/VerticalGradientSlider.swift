@@ -16,11 +16,18 @@ struct VerticalGradientSlider: View {
     let range: ClosedRange<Double>
     let gradient: Gradient
     var resetValue: Double? = nil
+    /// `false` (default) draws the thin full-width bar described above. `true` swaps in the same
+    /// rotated-square diamond `MinimalSlider`'s `.diamond` thumb style uses, for faders opting into
+    /// that look (Chr/Vib/Sat in `ColorBalanceBarView`) instead of the bar.
+    var diamondThumb: Bool = false
 
     @State private var previousDragY: CGFloat? = nil
 
     private let trackWidth: CGFloat = 18
     private let thumbHeight: CGFloat = 6
+    /// Matches `MinimalSlider`'s own diamond sizing exactly (`thumbDiameter * 0.72`, where
+    /// `thumbDiameter` there is 14) so the shape reads identically wherever it's used.
+    private let diamondSide: CGFloat = 14 * 0.72
     private let fineFactor: CGFloat = 0.2
 
     var body: some View {
@@ -43,11 +50,21 @@ struct VerticalGradientSlider: View {
                             .clipShape(RoundedRectangle(cornerRadius: trackWidth / 2))
                     )
 
-                RoundedRectangle(cornerRadius: thumbHeight / 2)
-                    .fill(Color.white)
-                    .frame(width: trackWidth + 6, height: thumbHeight)
-                    .shadow(radius: 1)
-                    .offset(y: thumbY - thumbHeight / 2)
+                if diamondThumb {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.white)
+                        .overlay(RoundedRectangle(cornerRadius: 1.5).strokeBorder(Color.black.opacity(0.18), lineWidth: 0.75))
+                        .frame(width: diamondSide, height: diamondSide)
+                        .rotationEffect(.degrees(45))
+                        .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+                        .offset(y: thumbY - diamondSide / 2)
+                } else {
+                    RoundedRectangle(cornerRadius: thumbHeight / 2)
+                        .fill(Color.white)
+                        .frame(width: trackWidth + 6, height: thumbHeight)
+                        .shadow(radius: 1)
+                        .offset(y: thumbY - thumbHeight / 2)
+                }
             }
             .contentShape(Rectangle())
             .gesture(

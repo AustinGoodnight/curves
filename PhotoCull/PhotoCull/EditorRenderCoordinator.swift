@@ -125,7 +125,11 @@ final class EditorRenderCoordinator {
         Task.detached(priority: .utility) {
             let luminance = Histogram.luminance(from: image)
             let hue = Histogram.hue(from: image)
-            let rgb = Histogram.rgbChannels(from: image)
+            // Higher resolution than the shared 64-bin default (`RGBHistogramView`'s own card is
+            // the one place in the editor a histogram is the main attraction, not a curve-graph
+            // backdrop) — `maxSamples` scaled up to match so each of the extra bins still gets a
+            // reasonable sample count instead of getting noisier for the same total budget.
+            let rgb = Histogram.rgbChannels(from: image, bins: 192, maxSamples: 120_000)
             let density = Histogram.colorDensity(from: image)
             await MainActor.run { [weak self] in
                 guard let self, generation == self.histogramGeneration else { return }

@@ -233,7 +233,7 @@ struct GridPane: View, Equatable {
                 ContentUnavailableView(
                     "No Photos",
                     systemImage: "photo.on.rectangle.angled",
-                    description: Text("Import a folder of RAW files to get started.")
+                    description: Text("Import a folder of photos to get started.")
                 )
             } else if store.filteredAssets.isEmpty {
                 ContentUnavailableView(
@@ -333,6 +333,7 @@ struct FlagFilterControl: View {
 /// "Done" button).
 struct ModeSwitcherControl: View {
     @Bindable var store: DetailStore
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     var body: some View {
         HStack(spacing: 2) {
@@ -351,11 +352,11 @@ struct ModeSwitcherControl: View {
         } label: {
             Text(mode.rawValue)
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .foregroundStyle(isSelected ? uiColors.accentColor : Color.secondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
                 .background(
-                    isSelected ? Color.accentColor.opacity(0.15) : Color.clear,
+                    isSelected ? uiColors.accentColor.opacity(0.15) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 6)
                 )
         }

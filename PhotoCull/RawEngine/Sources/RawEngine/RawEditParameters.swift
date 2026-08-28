@@ -20,6 +20,10 @@ public struct RawBaseParameters: Equatable, Sendable {
     /// for the same reason as every other field on this struct — see `LensCorrectionParameters`'s
     /// doc comment.
     public var lensCorrection: LensCorrectionParameters?
+    /// `nil` means "no spots to heal/clone". Applied after the stage stack but still ahead of
+    /// `crop` — see `SpotRemoval`'s doc comment for why its coordinates are defined in this,
+    /// pre-crop frame, and `RawImageRenderer`'s render methods for exactly where this runs.
+    public var spotRemoval: SpotRemovalParameters?
     /// `nil` means "no straighten/crop" (full, unrotated frame). Unlike every other field on this
     /// struct, `RawImageRenderer` applies this dead last, after the stage stack — see
     /// `CropParameters`'s doc comment for why.
@@ -33,6 +37,7 @@ public struct RawBaseParameters: Equatable, Sendable {
         sharpnessAmount: Double? = nil,
         denoise: DenoiseParameters? = nil,
         lensCorrection: LensCorrectionParameters? = nil,
+        spotRemoval: SpotRemovalParameters? = nil,
         crop: CropParameters? = nil
     ) {
         self.exposure = exposure
@@ -42,6 +47,7 @@ public struct RawBaseParameters: Equatable, Sendable {
         self.sharpnessAmount = sharpnessAmount
         self.denoise = denoise
         self.lensCorrection = lensCorrection
+        self.spotRemoval = spotRemoval
         self.crop = crop
     }
 

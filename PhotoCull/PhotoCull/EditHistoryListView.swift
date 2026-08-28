@@ -11,6 +11,7 @@ import SwiftUI
 /// `EditorSidebarView`/`ColorBalanceBarView`'s split — see `EditorRenderCoordinator`'s doc comment.
 struct EditHistoryListView: View {
     let history: EditHistory
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     var body: some View {
         ScrollView {
@@ -43,6 +44,6 @@ struct EditHistoryListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(isCurrent ? Color.accentColor.opacity(0.2) : Color.clear)
+        .background(isCurrent ? uiColors.accentColor.opacity(0.2) : Color.clear)
     }
 }

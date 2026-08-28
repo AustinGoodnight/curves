@@ -45,6 +45,7 @@ struct ColorBalanceBarView: View {
     let wheelDiameter: CGFloat
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     /// Set in Settings (`SettingsView`) — whether the WB group below renders as the classic
     /// Temp/Tint fader pair or the single `XYWhiteBalanceControl` pad. Not per-photo state.
@@ -90,7 +91,7 @@ struct ColorBalanceBarView: View {
         .padding(.top, 8)
         .toggleStyle(.switch)
         .disabled(!coordinator.isReady)
-        .background(Color.sidebarBackground)
+        .background(uiColors.sidebarBackground)
     }
 
     /// No reset button for Color Balance RGB as a whole (each wheel and fader already double-
@@ -190,19 +191,19 @@ struct ColorBalanceBarView: View {
                     verticalGradientSlider(
                         "Chr", value: stageBind(\.editColorBalanceChromaGlobal, fallback: 0, module: balanceGate),
                         range: -0.5...0.5, gradient: .colorIntensity,
-                        valueText: ""
+                        valueText: "", diamondThumb: true
                     )
                     verticalGradientSlider(
                         "Vib", value: stageBind(\.editColorBalanceVibrance, fallback: 0, module: balanceGate),
                         range: -0.5...0.5, gradient: .colorIntensity,
-                        valueText: ""
+                        valueText: "", diamondThumb: true
                     )
                     verticalGradientSlider(
                         "Sat", value: stageBind(
                             \.editFilmicSaturation, fallback: FilmicRGBParameters.darktableDefault.saturation, module: balanceGate
                         ),
                         range: -100...100, gradient: .colorIntensity,
-                        valueText: "", resetValue: FilmicRGBParameters.darktableDefault.saturation
+                        valueText: "", resetValue: FilmicRGBParameters.darktableDefault.saturation, diamondThumb: true
                     )
                 }
             }
@@ -227,12 +228,12 @@ struct ColorBalanceBarView: View {
                         "Sharp", value: bind(
                             \.editSharpnessAmount, fallback: coordinator.renderer.defaultSharpnessAmount, module: detailGate
                         ),
-                        range: 0...1, valueText: "", resetValue: coordinator.renderer.defaultSharpnessAmount
+                        range: 0...1, valueText: "", resetValue: coordinator.renderer.defaultSharpnessAmount, diamondThumb: true
                     )
                 }
                 verticalCircleSlider(
                     "Dehaze", value: stageBind(\.editDehazeAmount, fallback: 0, module: detailGate),
-                    range: 0...1, valueText: ""
+                    range: 0...1, valueText: "", diamondThumb: true
                 )
                 // Asset-level like Sharpness above (see `PhotoAsset.editDenoiseAmount`'s doc
                 // comment), so `bind(...)` not `stageBind(...)`. No `isSharpnessSupported`-style
@@ -241,7 +242,7 @@ struct ColorBalanceBarView: View {
                 // as dragging this fader to 0.
                 verticalCircleSlider(
                     "Denoise", value: bind(\.editDenoiseAmount, fallback: 0, module: detailGate),
-                    range: 0...1, valueText: ""
+                    range: 0...1, valueText: "", diamondThumb: true
                 )
             }
         }

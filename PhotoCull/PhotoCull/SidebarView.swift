@@ -8,6 +8,7 @@ struct SidebarView: View, Equatable {
     @Binding var selectedScene: PhotoScene?
     var onNewScene: (Session) -> Void
     var onDeleteScene: (PhotoScene) -> Void
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     static func == (lhs: SidebarView, rhs: SidebarView) -> Bool {
         lhs.sessions == rhs.sessions && lhs.scenes == rhs.scenes
@@ -50,14 +51,14 @@ struct SidebarView: View, Equatable {
                     }
                     .buttonStyle(.plain)
                     .padding(.vertical, 4)
-                    .background(isSessionSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+                    .background(isSessionSelected ? uiColors.accentColor.opacity(0.2) : Color.clear)
                     .textCase(nil)
                 }
             }
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
-        .background(Color.sidebarBackground)
+        .background(uiColors.sidebarBackground)
         .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 300)
     }
 
@@ -73,6 +74,6 @@ struct SidebarView: View, Equatable {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .listRowBackground(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+        .listRowBackground(isSelected ? uiColors.accentColor.opacity(0.2) : Color.clear)
     }
 }

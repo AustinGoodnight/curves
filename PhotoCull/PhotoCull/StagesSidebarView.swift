@@ -35,10 +35,12 @@ struct StagesSidebarView: View {
     /// `.linearGradientMask`/`.radialGradientMask` stage — same two call sites as `onEditMask`,
     /// just routed to the gradient-handle editor instead of the brush one.
     var onEditGradientMask: (Stage) -> Void
-    /// Enters `CropEditorOverlay` (`EditorView.cropEditing`) — asset-level, so unlike
-    /// `onEditMask`/`onEditGradientMask` this takes no stage argument.
-    var onEditCrop: () -> Void
+    /// Enters `ColorRangeMaskEditorOverlay` (`EditorView.colorRangeEditingStage`) for the given
+    /// `.colorRangeMask` stage — same two call sites as `onEditMask`/`onEditGradientMask`, just
+    /// routed to the color-sampling editor instead.
+    var onEditColorRangeMask: (Stage) -> Void
     @Environment(\.modelContext) private var modelContext
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     @State private var renamingStage: Stage?
     @State private var renameText = ""
@@ -91,15 +93,6 @@ struct StagesSidebarView: View {
 
     var body: some View {
         List {
-            Button {
-                onEditCrop()
-            } label: {
-                Label(
-                    cropHasAdjustments(asset) ? "Adjust Crop & Straighten…" : "Crop & Straighten…",
-                    systemImage: "crop.rotate"
-                )
-            }
-            .buttonStyle(.plain)
             Section("Stages") {
                 if let sceneStage = asset.scene?.stage {
                     row(for: sceneStage, title: asset.scene.map { "Scene: \($0.name)" } ?? "Scene")
@@ -137,6 +130,13 @@ struct StagesSidebarView: View {
                 addGradientMaskStage(kind: .radialGradientMask)
             } label: {
                 Label("Add Radial Gradient Mask", systemImage: "target")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            Button {
+                addColorRangeMaskStage()
+            } label: {
+                Label("Add Color Range Mask", systemImage: "eyedropper")
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -213,12 +213,12 @@ struct StagesSidebarView: View {
                             if isCurrent {
                                 Spacer()
                                 Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(Color.accentColor)
+                                    .foregroundStyle(uiColors.accentColor)
                             }
                         }
                         .contentShape(Rectangle())
                         .onTapGesture { if !isCurrent { onSelectAsset(photo) } }
-                        .listRowBackground(isCurrent ? Color.accentColor.opacity(0.2) : Color.clear)
+                        .listRowBackground(isCurrent ? uiColors.accentColor.opacity(0.2) : Color.clear)
                     }
                 }
             }
@@ -228,7 +228,7 @@ struct StagesSidebarView: View {
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
-        .background(Color.sidebarBackground)
+        .background(uiColors.sidebarBackground)
         .alert("Rename Stage", isPresented: Binding(
             get: { renamingStage != nil },
             set: { if !$0 { renamingStage = nil } }
@@ -324,13 +324,16 @@ struct StagesSidebarView: View {
             .toggleStyle(.switch)
             .controlSize(.mini)
         }
-        .listRowBackground(selectedStage.id == stage.id ? Color.accentColor.opacity(0.2) : Color.clear)
+        .listRowBackground(selectedStage.id == stage.id ? uiColors.accentColor.opacity(0.2) : Color.clear)
         .contextMenu {
             if stage.kind == .assistedMask {
                 Button("Refine Mask…") { onEditMask(stage) }
             }
             if stage.kind == .linearGradientMask || stage.kind == .radialGradientMask {
                 Button("Adjust Gradient…") { onEditGradientMask(stage) }
+            }
+            if stage.kind == .colorRangeMask {
+                Button("Adjust Color Range…") { onEditColorRangeMask(stage) }
             }
             Button("Save as Preset…") { beginSavePreset(stage) }
             Button("Save as Default Stage") { saveAsDefaultStage(stage) }
@@ -452,6 +455,24 @@ struct StagesSidebarView: View {
         selectedStage = stage
         refreshAndRender()
         onEditGradientMask(stage)
+    }
+
+    /// Same blank-slate/ownership rules as `addCustomStage()`/`addAssistedMaskStage()`, immediately
+    /// handing the new stage to `onEditColorRangeMask` so `ColorRangeMaskEditorOverlay` opens right
+    /// away — same "not a useful state to leave the user in" reasoning as `addAssistedMaskStage()`,
+    /// since a `.colorRangeMask` stage with no sampled color yet has nothing to show.
+    private func addColorRangeMaskStage() {
+        let nextIndex = (asset.customStages.map(\.sortIndex).max() ?? -1) + 1
+        let stage: Stage
+        if let stack = asset.stack {
+            stage = Stage(kind: .colorRangeMask, name: "Color Range \(nextIndex + 1)", stack: stack, sortIndex: nextIndex)
+        } else {
+            stage = Stage(kind: .colorRangeMask, name: "Color Range \(nextIndex + 1)", asset: asset, sortIndex: nextIndex)
+        }
+        modelContext.insert(stage)
+        selectedStage = stage
+        refreshAndRender()
+        onEditColorRangeMask(stage)
     }
 
     private func beginRename(_ stage: Stage) {

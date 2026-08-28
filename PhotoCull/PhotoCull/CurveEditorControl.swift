@@ -4,12 +4,14 @@ import RawEngine
 /// A Lightroom/Photoshop-style tone curve editor: drag existing points, click empty graph space
 /// to add a new one (up to `RGBCurveKernel.maxNodes`), double-click an interior point to remove
 /// it. The two endpoints are always present and can't be removed. Interior points drag freely in
-/// both axes; when `showEndpointControls` is on, the two endpoints instead lock x for the
-/// duration of a drag and move in y only (their input stays fixed; only their output level
-/// changes) — see `handleEndpointDrag`'s doc comment for why, and for why the two endpoints don't
-/// even move at the same y speed as each other. `showEndpointControls` also adds a dedicated
-/// slider along the left edge (black point output) and the top edge (white point output) as an
-/// easier way to make the same adjustment than grabbing the small point handle directly.
+/// both axes; when `showEndpointControls` is on, the two endpoints instead each lock one axis for
+/// the duration of a drag: the bottom (black point) endpoint locks x and slides in y along the
+/// left edge (its input stays fixed; only its output level changes), while the top (white point)
+/// endpoint locks y and slides in x along the top edge instead — see `handleEndpointDrag`'s doc
+/// comment for why, and for why the two endpoints don't even move at the same speed as each other.
+/// When `showEndpointControls` is on, the two endpoint handles also render as triangles (pointing
+/// into the graph from the edge each is pinned to) instead of the plain circle every interior
+/// point uses, marking at a glance that these two only slide along their own edge.
 ///
 /// `showEndpointControls` defaults off and only RGB Curve's own call site turns it on — Color
 /// Zones' curve has no black/white-point concept (its endpoints aren't fixed at x=0/x=1 the way
@@ -80,11 +82,6 @@ struct CurveEditorControl: View {
     /// comment for why the two endpoints get such different feels rather than sharing one.
     private let bottomEndpointFineFactor: Double = 0.25
 
-    /// Width of the dedicated black-point slider along the left edge (and, to keep the top
-    /// slider's own track aligned with the graph rather than starting under that left slider, the
-    /// width of the leading spacer reserved above it too).
-    private let endpointSliderThickness: CGFloat = 24
-
     /// Which sorted-index endpoint (0 or `sortedPoints.count - 1`) is currently being dragged, if
     /// any — drives `endpointDragGuide`'s vertical line, which only shows while that specific
     /// gesture is live. `nil` the rest of the time.
@@ -93,6 +90,7 @@ struct CurveEditorControl: View {
     /// position) tracking — same "compute from the previous event, not the gesture's start"
     /// technique `MinimalSlider`'s Shift-fine-drag and friends use elsewhere in this app.
     @State private var previousEndpointDragY: CGFloat? = nil
+    @Environment(ColorSchemeStore.self) private var uiColors
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -116,28 +114,20 @@ struct CurveEditorControl: View {
                 }
             }
 
-            // Dedicated white-point-output slider along the top edge — an easier way to make the
-            // same adjustment `handleEndpointDrag`'s "quick" top-endpoint drag makes, without
-            // having to land the cursor on the small point handle itself. The leading spacer
-            // matches `endpointSliderThickness` so this track starts above the *graph's* own
-            // left edge, not above the black-point slider sitting to the graph's left below it.
-            if showEndpointControls {
-                HStack(spacing: 8) {
-                    Color.clear.frame(width: endpointSliderThickness)
-                    MinimalSlider(value: whitePointYBinding, range: 0...1, resetValue: identityPoints.last?.y ?? 1)
-                }
-            }
-
-            HStack(spacing: 8) {
-                // Dedicated black-point-output slider along the left edge — same idea as the top
-                // slider above, for the "shallow" bottom endpoint.
-                if showEndpointControls {
-                    VerticalCircleSlider(value: blackPointYBinding, range: 0...1, resetValue: identityPoints.first?.y ?? 0)
-                        .frame(width: endpointSliderThickness, height: height)
-                }
-
-                GeometryReader { geo in
-                    let width = geo.size.width
+            GeometryReader { geo in
+                let width = geo.size.width
+                ZStack {
+                    // Everything that should respect the graph's rounded bounds lives in this
+                    // inner ZStack (not `Group` — a `Group`'s `.background`/`.clipShape`/`.overlay`
+                    // apply separately to *each* child rather than to the composed whole, which
+                    // silently clipped every piece down to its own tiny natural bounds instead of
+                    // the shared graph rect; `ZStack` composes its children into one sized unit
+                    // first, so modifiers chained after it apply once, to that whole union).
+                    // The point handles below are a separate layer *outside* this clip — the two
+                    // endpoint handles sit exactly on the x=0/x=1 boundary, and a triangle bisected
+                    // by the clip edge reads as visually broken in a way a symmetric circle didn't,
+                    // so handles now always render whole, on top of the bordered graph rather than
+                    // half-cut-off.
                     ZStack {
                         if !showHueAxis {
                             histogramBars(width: width)
@@ -149,48 +139,25 @@ struct CurveEditorControl: View {
                         endpointDragGuide(width: width)
                         curveStroke(width: width)
                         addPointLayer(width: width)
-                        ForEach(sortedPoints.indices, id: \.self) { i in
-                            pointHandle(at: i, width: width)
-                        }
                     }
                     .background(graphBackground)
                     .clipShape(graphClipShape)
-                    .overlay(graphClipShape.stroke(Color.primary.opacity(0.2), lineWidth: 1))
+                    // Same `uiColors.recessedTrackBackground` used above and by
+                    // `MinimalSlider`/`VerticalCircleSlider`'s own track, reused here as the
+                    // border stroke instead of a plain `Color.primary`-based line.
+                    .overlay(graphClipShape.stroke(uiColors.recessedTrackBackground, lineWidth: 1))
+
+                    ForEach(sortedPoints.indices, id: \.self) { i in
+                        pointHandle(at: i, width: width)
+                    }
                 }
-                .frame(height: height)
             }
+            .frame(height: height)
 
             if showHueAxis {
                 hueAxisStrip
             }
         }
-    }
-
-    /// Reads/writes the black point's (leftmost sorted point's) own y — backs the left-edge
-    /// slider `showEndpointControls` adds. A computed `Binding` rather than a stored one since
-    /// the underlying point's *index* in `points` can change (`sortedPoints` re-sorts on every
-    /// edit) even though it's always `sortedPoints.first`.
-    private var blackPointYBinding: Binding<Double> {
-        Binding(
-            get: { sortedPoints.first?.y ?? 0 },
-            set: { newY in
-                guard let first = sortedPoints.first, let idx = points.firstIndex(of: first) else { return }
-                points[idx] = SIMD2(first.x, newY)
-                onChange()
-            }
-        )
-    }
-
-    /// The white point's (rightmost sorted point's) own y — see `blackPointYBinding`.
-    private var whitePointYBinding: Binding<Double> {
-        Binding(
-            get: { sortedPoints.last?.y ?? 1 },
-            set: { newY in
-                guard let last = sortedPoints.last, let idx = points.firstIndex(of: last) else { return }
-                points[idx] = SIMD2(last.x, newY)
-                onChange()
-            }
-        )
     }
 
     private var graphClipShape: AnyShape {
@@ -204,16 +171,19 @@ struct CurveEditorControl: View {
     private static let hueSpectrum: [Color] = stride(from: 0.0, through: 1.0, by: 1.0 / 12.0)
         .map { Color(hue: $0, saturation: 0.85, brightness: 0.95) }
 
-    /// Color Zones gets the spectrum; RGB Curve gets no fill at all — it now sits directly on
-    /// whatever background it's placed against (the sidebar's own) rather than a lighter panel
-    /// color, with `graphClipShape.stroke(...)` (see above) as the only thing marking its bounds.
+    /// Color Zones gets the spectrum; RGB Curve gets `uiColors.recessedTrackBackground` — the same
+    /// fixed opaque fill `MinimalSlider`/`VerticalCircleSlider` use for their own track background
+    /// and this graph's own border stroke below. See that color's own doc comment for why it's a
+    /// flat absolute color rather than a translucent black — this `Group` and the sliders don't
+    /// sit on the same backdrop, so a translucent overlay rendered visibly different final colors
+    /// on each despite being the same nominal opacity.
     @ViewBuilder
     private var graphBackground: some View {
         if showHueAxis {
             LinearGradient(colors: Self.hueSpectrum, startPoint: .leading, endPoint: .trailing)
                 .opacity(0.55)
         } else {
-            Color.clear
+            uiColors.recessedTrackBackground
         }
     }
 
@@ -278,18 +248,27 @@ struct CurveEditorControl: View {
         .stroke(Color.primary.opacity(0.12), lineWidth: 1)
     }
 
-    /// A plumb line at the dragged endpoint's fixed input (x) position, spanning the full graph
-    /// height — shows only while `draggingEndpointIndex` is set (i.e. mid-drag on that specific
-    /// point), same dashed weight `referenceLines` uses. `handleEndpointDrag` never reassigns that
-    /// endpoint's x for the duration of the drag, so this line's own x stays put too — it marks
-    /// the fixed column the point is sliding up/down within, not something that itself moves.
+    /// A guide line at the dragged endpoint's fixed coordinate — shows only while
+    /// `draggingEndpointIndex` is set (i.e. mid-drag on that specific point), same dashed weight
+    /// `referenceLines` uses. The bottom (black point) endpoint still fixes x and slides in y, so
+    /// it gets a vertical plumb line at that fixed column; the top (white point) endpoint now fixes
+    /// y and slides in x instead (see `handleEndpointDrag`'s doc comment), so it gets a horizontal
+    /// line at that fixed row instead.
     @ViewBuilder
     private func endpointDragGuide(width: CGFloat) -> some View {
         if let draggingEndpointIndex, draggingEndpointIndex < sortedPoints.count {
-            let x = CGFloat(sortedPoints[draggingEndpointIndex].x) * width
+            let point = sortedPoints[draggingEndpointIndex]
+            let isTopEndpoint = draggingEndpointIndex == sortedPoints.count - 1
             Path { path in
-                path.move(to: CGPoint(x: x, y: 0))
-                path.addLine(to: CGPoint(x: x, y: height))
+                if isTopEndpoint {
+                    let y = (1 - CGFloat(point.y)) * height
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: width, y: y))
+                } else {
+                    let x = CGFloat(point.x) * width
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: height))
+                }
             }
             .stroke(Color.primary.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
             .allowsHitTesting(false)
@@ -301,6 +280,10 @@ struct CurveEditorControl: View {
     /// sibling here is proposed the same box by the enclosing `GeometryReader`, but sharing one
     /// source of truth rules out any drift between the bars and the curve/points sitting on top
     /// of them instead of leaving it to coincidence.
+    ///
+    /// Tinted with `uiColors.accentColor` at a low opacity rather than a flat `Color.primary`
+    /// (stark white in this app's fixed dark theme) — reads as a quiet backdrop that belongs to
+    /// the same accent-colored curve line sitting on top of it, instead of an unrelated gray block.
     private func histogramBars(width: CGFloat) -> some View {
         Canvas { context, _ in
             guard let histogram, !histogram.isEmpty else { return }
@@ -311,7 +294,7 @@ struct CurveEditorControl: View {
                     x: CGFloat(i) * binWidth, y: height - barHeight,
                     width: max(1, binWidth - 0.5), height: barHeight
                 )
-                context.fill(Path(rect), with: .color(Color.primary.opacity(0.12)))
+                context.fill(Path(rect), with: .color(uiColors.accentColor.opacity(0.16)))
             }
         }
     }
@@ -344,7 +327,9 @@ struct CurveEditorControl: View {
     /// Same white-circle + small-center-dot + shadow look as the color wheels' own puck
     /// (`ColorWheelControl`'s `puckDiameter`-sized `Circle` over its 3pt center dot) — one
     /// consistent "control dial" language for every draggable handle in the editor, not a plain
-    /// dot here and a fuller puck there.
+    /// dot here and a fuller puck there. The two endpoints switch to `EdgeTriangle` instead,
+    /// mirrored so each points out of the edge it's pinned to, whenever `showEndpointControls` is
+    /// on — see the struct doc comment.
     private func pointHandle(at index: Int, width: CGFloat) -> some View {
         // Structural — these two points can never be deleted, regardless of `showEndpointControls`.
         let isEndpoint = index == 0 || index == sortedPoints.count - 1
@@ -355,13 +340,25 @@ struct CurveEditorControl: View {
         let p = sortedPoints[index]
         return ZStack {
             Circle().fill(Color.clear).frame(width: 24, height: 24)
-            Circle()
-                .fill(Color.white)
-                .frame(width: 13, height: 13)
-                .shadow(radius: 1)
-            Circle()
-                .fill(Color.primary.opacity(0.4))
-                .frame(width: 3, height: 3)
+            if useEndpointDrag {
+                // index == 0 is the leftmost (black) point, pinned to the graph's left edge —
+                // points right, in from that edge. The rightmost (white) point is pinned to the
+                // top edge — points down, in from that edge, via a 90° clockwise rotation of the
+                // same right-pointing base shape.
+                EdgeTriangle()
+                    .fill(Color.white)
+                    .frame(width: 14, height: 14)
+                    .rotationEffect(.degrees(index == 0 ? 0 : 90))
+                    .shadow(radius: 1)
+            } else {
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 13, height: 13)
+                    .shadow(radius: 1)
+                Circle()
+                    .fill(Color.primary.opacity(0.4))
+                    .frame(width: 3, height: 3)
+            }
         }
         .contentShape(Circle())
         .position(screenPoint(for: p, width: width))
@@ -369,7 +366,7 @@ struct CurveEditorControl: View {
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
                     if useEndpointDrag {
-                        handleEndpointDrag(value, originalValue: p, isTop: index == sortedPoints.count - 1, height: height)
+                        handleEndpointDrag(value, originalValue: p, isTop: index == sortedPoints.count - 1, width: width, height: height)
                     } else {
                         updatePoint(originalValue: p, to: curveValue(for: value.location, width: width))
                     }
@@ -407,35 +404,40 @@ struct CurveEditorControl: View {
 
     /// Drives the two endpoints' drag behavior when `showEndpointControls` is on — deliberately
     /// different from `updatePoint`'s (and from each other's) rather than sharing one path:
-    /// - x stays exactly where it already was (`originalValue.x`, never reassigned) — the
-    ///   endpoint's input position is fixed, only its output level moves. `endpointDragGuide`'s
-    ///   vertical line marks that fixed column while the drag is live.
-    /// - y itself moves at two deliberately different speeds. The *top* endpoint (white point,
-    ///   `isTop`) uses the same absolute cursor-to-y mapping every non-endpoint point already
-    ///   uses — direct, immediate, "quick." The *bottom* endpoint (black point) instead uses a
-    ///   relative delta from the previous drag event, damped by `bottomEndpointFineFactor`, the
-    ///   same "compute from the previous event" technique `MinimalSlider`'s Shift-fine-drag uses —
-    ///   except here it's the endpoint's *default* feel, not something gated behind a modifier
-    ///   key, since the black point is the one that benefits from "really shallow" precision by
-    ///   default (a small shift in the shadow output level reads as a much bigger visual change
-    ///   than the same shift does at the white point).
-    private func handleEndpointDrag(_ drag: DragGesture.Value, originalValue: SIMD2<Double>, isTop: Bool, height: CGFloat) {
+    /// - The *bottom* endpoint (black point) fixes x (`originalValue.x`, never reassigned — its
+    ///   input position is fixed, only its output level moves) and slides in y instead, using a
+    ///   relative delta from the previous drag event damped by `bottomEndpointFineFactor` — the
+    ///   same "compute from the previous event" technique `MinimalSlider`'s Shift-fine-drag uses,
+    ///   except here it's the endpoint's *default* feel: a small shift in the shadow output level
+    ///   reads as a much bigger visual change than the same shift at the white point, so it gets
+    ///   "really shallow" precision by default rather than something gated behind a modifier key.
+    ///   `endpointDragGuide`'s vertical line marks its fixed column while the drag is live.
+    /// - The *top* endpoint (white point, `isTop`) instead fixes y and slides in x, along the
+    ///   graph's top edge — the same direct, absolute cursor-to-x mapping every non-endpoint
+    ///   point's drag already uses, clamped to stay right of its neighbor by `minGap` (same clamp
+    ///   `updatePoint` applies to every interior point) so it can't cross past it. `
+    ///   endpointDragGuide`'s horizontal line marks its fixed row while the drag is live.
+    private func handleEndpointDrag(_ drag: DragGesture.Value, originalValue: SIMD2<Double>, isTop: Bool, width: CGFloat, height: CGFloat) {
         guard let index = points.firstIndex(of: originalValue) else { return }
-        guard let orderedIndex = sortedPoints.firstIndex(of: originalValue) else { return }
+        let ordered = sortedPoints
+        guard let orderedIndex = ordered.firstIndex(of: originalValue) else { return }
 
         if draggingEndpointIndex != orderedIndex { draggingEndpointIndex = orderedIndex }
 
-        let newY: Double
+        let newPoint: SIMD2<Double>
         if isTop {
-            newY = min(max(Double(1 - drag.location.y / height), 0), 1)
+            let lowerBound = orderedIndex > 0 ? ordered[orderedIndex - 1].x + minGap : 0
+            let newX = min(max(Double(drag.location.x / width), lowerBound), 1)
+            newPoint = SIMD2(newX, originalValue.y)
         } else {
             let previousY = previousEndpointDragY ?? drag.location.y
             let deltaY = Double((previousY - drag.location.y) / height) * bottomEndpointFineFactor
-            newY = min(max(originalValue.y + deltaY, 0), 1)
+            let newY = min(max(originalValue.y + deltaY, 0), 1)
+            newPoint = SIMD2(originalValue.x, newY)
         }
         previousEndpointDragY = drag.location.y
 
-        points[index] = SIMD2(originalValue.x, newY)
+        points[index] = newPoint
         onChange()
     }
 
@@ -458,5 +460,20 @@ struct CurveEditorControl: View {
     private func reset() {
         points = identityPoints
         onChange()
+    }
+}
+
+/// A small triangle pointing right (apex on the trailing edge, flat base on the leading edge) —
+/// `pointHandle` rotates it per endpoint (0° for the left-edge black point, 90° clockwise for the
+/// top-edge white point, which turns "points right" into "points down") rather than giving each
+/// its own path.
+private struct EdgeTriangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        path.closeSubpath()
+        return path
     }
 }

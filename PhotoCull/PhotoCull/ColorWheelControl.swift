@@ -30,6 +30,7 @@ struct ColorWheelControl: View {
 
     @State private var previousPuckLocation: CGPoint? = nil
     @State private var previousArcTheta: Double? = nil
+    @Environment(ColorSchemeStore.self) private var uiColors
     private let fineFactor: CGFloat = 0.2
 
     var body: some View {
@@ -196,7 +197,7 @@ struct ColorWheelControl: View {
         let zeroFraction = luminanceFraction(max(luminanceRange.lowerBound, min(0, luminanceRange.upperBound)))
         let valueFraction = luminanceFraction(luminance)
         return arcPath(fromAngle: arcAngle(forFraction: zeroFraction), toAngle: arcAngle(forFraction: valueFraction))
-            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+            .stroke(uiColors.accentColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
     }
 
     private var arcThumb: some View {

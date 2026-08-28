@@ -6,8 +6,8 @@ import RawEngine
 /// Builds render parameters from an asset's base fields and a stage's stored module fields, plus
 /// the smaller per-module pieces and reset/has-edits helpers they're assembled from. Free
 /// functions rather than computed properties on `EditorView` so every control cluster
-/// (`EditorSidebarView`, `ColorBalanceBarView`, `EditorFooterActions`) can build what it needs to
-/// hand to `EditorRenderCoordinator` without funneling through a shared parent.
+/// (`EditorSidebarView`, `ColorBalanceBarView`) can build what it needs to hand to
+/// `EditorRenderCoordinator` without funneling through a shared parent.
 
 // MARK: - Base params (PhotoAsset — native `CIRAWFilter` inputs, not stackable per-stage)
 
@@ -19,6 +19,7 @@ func rawBaseParameters(for asset: PhotoAsset) -> RawBaseParameters {
         sharpnessAmount: asset.editDetailEnabled ? asset.editSharpnessAmount : nil,
         denoise: (asset.editDetailEnabled ? asset.editDenoiseAmount : nil).map(DenoiseParameters.init(amount:)),
         lensCorrection: lensCorrectionParameters(for: asset),
+        spotRemoval: spotRemovalParameters(for: asset),
         crop: cropParameters(for: asset)
     )
 }
@@ -35,6 +36,16 @@ func lensCorrectionParameters(for asset: PhotoAsset) -> LensCorrectionParameters
     ) else { return nil }
     profile.intensity = asset.editLensCorrectionIntensity ?? 1
     return profile
+}
+
+/// Decodes `asset.spotRemovalData` (see its doc comment on `PhotoAsset`) back into the
+/// `SpotRemovalParameters` `RawImageRenderer` reads — `nil` whenever there's no data, it fails to
+/// decode, or it decodes to an empty list, same "nil = no contribution" convention as every other
+/// base param.
+func spotRemovalParameters(for asset: PhotoAsset) -> SpotRemovalParameters? {
+    guard let data = asset.spotRemovalData,
+          let spots = try? JSONDecoder().decode([SpotRemoval].self, from: data), !spots.isEmpty else { return nil }
+    return SpotRemovalParameters(spots: spots)
 }
 
 /// `nil` whenever `asset` has no straighten/crop set at all — same "nil = no contribution"
@@ -238,10 +249,6 @@ func syncModuleEnabled(_ gate: ModuleGate, hadAdjustments: Bool) {
 
 // MARK: - Has-adjustments
 
-func dehazeHasAdjustments(_ stage: Stage) -> Bool {
-    stage.editDehazeAmount != nil
-}
-
 func filmicHasAdjustments(_ stage: Stage) -> Bool {
     stage.editFilmicWhitePointSource != nil || stage.editFilmicBlackPointSource != nil
         || stage.editFilmicContrast != nil || stage.editFilmicLatitude != nil
@@ -290,24 +297,6 @@ func detailHasAdjustments(asset: PhotoAsset, stage: Stage) -> Bool {
     asset.editSharpnessAmount != nil || asset.editDenoiseAmount != nil || stage.editDehazeAmount != nil
 }
 
-/// Whether `stage` itself carries any adjustments — used to grey out per-stage reset buttons and
-/// (via `hasAnyEdits`) "Reset All". Each module's own bypass switch is kept in sync with this by
-/// `syncModuleEnabled`, so — unlike before this existed — a disabled switch never needs checking
-/// here separately: a module left enabled with nothing set, or disabled while still holding
-/// values, are exactly the two states `syncModuleEnabled` guards against/preserves respectively.
-func stageHasEdits(_ stage: Stage) -> Bool {
-    dehazeHasAdjustments(stage) || filmicHasAdjustments(stage) || colorBalanceHasAdjustments(stage)
-        || rgbCurveHasAdjustments(stage) || colorZonesHasAdjustments(stage) || lut3DHasAdjustments(stage)
-}
-
-/// Whether there's anything for "Reset All" to do — the asset's base params plus whichever stage
-/// is currently selected for editing. Scoped to the selected stage rather than every active stage
-/// so "Reset All" only ever touches what's currently on screen, matching the "blank slate"
-/// editing model (see `Stage`'s doc comment). Lens correction keeps its own explicit
-/// `!editLensCorrectionEnabled` check (unlike every other module here) because it's the one switch
-/// that's meaningfully "on" even with zero adjustments — see
-/// `PhotoAsset.editLensCorrectionEnabled`'s doc comment for why it's on-by-default rather than an
-/// opt-in module like the others.
 /// Whether `asset` has a straighten angle or crop rect set — see the crop fields' doc comment on
 /// `PhotoAsset` for why checking the rect's width alone is enough (all four rect fields are always
 /// set together).
@@ -315,50 +304,15 @@ func cropHasAdjustments(_ asset: PhotoAsset) -> Bool {
     asset.editCropAngleDegrees != nil || asset.editCropRectWidth != nil
 }
 
-func hasAnyEdits(asset: PhotoAsset, stage: Stage) -> Bool {
-    asset.editExposure != nil || whiteBalanceHasAdjustments(asset) || asset.editSharpnessAmount != nil
-        || asset.editDenoiseAmount != nil
-        || !asset.editLensCorrectionEnabled || asset.editLensCorrectionIntensity != nil
-        || cropHasAdjustments(asset)
-        || stageHasEdits(stage)
+/// True whenever `asset` has at least one spot committed — checked via the decoded params rather
+/// than just `asset.spotRemovalData != nil`, so a "Done" that leaves the spot list empty (every
+/// spot deleted) still reports no adjustments instead of leaving a stale non-nil-but-empty blob
+/// looking like a real edit.
+func spotRemovalHasAdjustments(_ asset: PhotoAsset) -> Bool {
+    spotRemovalParameters(for: asset) != nil
 }
 
 // MARK: - Reset
-
-func resetDehaze(_ stage: Stage) {
-    stage.editDehazeAmount = nil
-}
-
-func resetFilmic(_ stage: Stage) {
-    stage.editFilmicEnabled = false
-    stage.editFilmicWhitePointSource = nil
-    stage.editFilmicBlackPointSource = nil
-    stage.editFilmicContrast = nil
-    stage.editFilmicLatitude = nil
-    stage.editFilmicSaturation = nil
-    stage.editFilmicBalance = nil
-}
-
-func resetColorBalance(_ stage: Stage) {
-    stage.editColorBalanceEnabled = false
-    stage.editColorWheelsEnabled = false
-    stage.editBalanceEnabled = false
-    stage.editColorBalanceGlobalY = nil
-    stage.editColorBalanceGlobalC = nil
-    stage.editColorBalanceGlobalH = nil
-    stage.editColorBalanceShadowsY = nil
-    stage.editColorBalanceShadowsC = nil
-    stage.editColorBalanceShadowsH = nil
-    stage.editColorBalanceMidtonesY = nil
-    stage.editColorBalanceMidtonesC = nil
-    stage.editColorBalanceMidtonesH = nil
-    stage.editColorBalanceHighlightsY = nil
-    stage.editColorBalanceHighlightsC = nil
-    stage.editColorBalanceHighlightsH = nil
-    stage.editColorBalanceContrast = nil
-    stage.editColorBalanceVibrance = nil
-    stage.editColorBalanceChromaGlobal = nil
-}
 
 func resetRGBCurve(_ stage: Stage) {
     stage.editRGBCurveEnabled = false
@@ -388,23 +342,4 @@ func resetCrop(_ asset: PhotoAsset) {
     asset.editCropRectY = nil
     asset.editCropRectWidth = nil
     asset.editCropRectHeight = nil
-}
-
-func resetAllEdits(asset: PhotoAsset, stage: Stage) {
-    asset.editExposure = nil
-    asset.editNeutralTemperature = nil
-    asset.editNeutralTint = nil
-    asset.editSharpnessAmount = nil
-    asset.editDenoiseAmount = nil
-    asset.editWhiteBalanceEnabled = false
-    asset.editDetailEnabled = false
-    asset.editLensCorrectionEnabled = true
-    asset.editLensCorrectionIntensity = nil
-    resetCrop(asset)
-    resetDehaze(stage)
-    resetFilmic(stage)
-    resetColorBalance(stage)
-    resetRGBCurve(stage)
-    resetColorZones(stage)
-    resetLUT3D(stage)
 }
