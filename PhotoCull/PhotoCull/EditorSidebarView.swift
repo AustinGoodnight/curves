@@ -67,20 +67,19 @@ struct EditorSidebarView: View {
                 // component) so Histogram can take the full row width and grow, instead of the two
                 // splitting it.
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Histogram")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    sectionTitle("Histogram", enabled: nil)
                     RGBHistogramView(data: coordinator.rgbHistogram, height: 240)
                         .frame(maxWidth: .infinity)
                 }
                 // Exposure (native `CIRAWFilter` input, asset-level) and Contrast (a Color
                 // Balance RGB field, per-stage) share one section despite coming from different
-                // params — both are basic tone controls, and grouping them saves a second header
-                // for what would otherwise be a single-slider section. Chroma/Vibrance, Color
-                // Balance RGB's other two "plain slider" fields, stayed in `ColorBalanceBarView`'s
-                // `colorBalanceSection` instead (vertical faders next to the wheels) since those
-                // read as color controls, not tone.
-                section("Exposure") {
+                // params — both are basic tone controls. No section title (each `slider(...)`
+                // already carries its own name, and a section header reading "Exposure" right
+                // above a slider *also* labeled "Exposure" was a redundant duplicate, not a
+                // meaningful group label). Chroma/Vibrance, Color Balance RGB's other two "plain
+                // slider" fields, stayed in `ColorBalanceBarView`'s `colorBalanceSection` instead
+                // (vertical faders next to the wheels) since those read as color controls, not tone.
+                section(nil) {
                     // `trackStyle: .hairline, thumbShape: .diamond` — the "Hairline · Diamond"
                     // style picked from the comparison row below, now live on the real controls.
                     slider(

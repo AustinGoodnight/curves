@@ -116,41 +116,25 @@ struct StagesSidebarView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            Button {
-                addAssistedMaskStage()
-            } label: {
-                Label("Add Assisted Mask Stage", systemImage: "wand.and.stars")
+            HStack(spacing: 14) {
+                maskBarButton(systemImage: "wand.and.stars", help: "Add Assisted Mask Stage") {
+                    addAssistedMaskStage()
+                }
+                maskBarButton(systemImage: "rectangle.righthalf.filled", help: "Add Linear Gradient Mask") {
+                    addGradientMaskStage(kind: .linearGradientMask)
+                }
+                maskBarButton(systemImage: "target", help: "Add Radial Gradient Mask") {
+                    addGradientMaskStage(kind: .radialGradientMask)
+                }
+                maskBarButton(systemImage: "eyedropper", help: "Add Color Range Mask") {
+                    addColorRangeMaskStage()
+                }
+                maskBarButton(systemImage: "wand.and.rays", help: "Add Object Mask (AI)") {
+                    addObjectMaskStage()
+                }
+                Spacer()
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            Button {
-                addGradientMaskStage(kind: .linearGradientMask)
-            } label: {
-                Label("Add Linear Gradient Mask", systemImage: "rectangle.righthalf.filled")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            Button {
-                addGradientMaskStage(kind: .radialGradientMask)
-            } label: {
-                Label("Add Radial Gradient Mask", systemImage: "target")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            Button {
-                addColorRangeMaskStage()
-            } label: {
-                Label("Add Color Range Mask", systemImage: "eyedropper")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            Button {
-                addObjectMaskStage()
-            } label: {
-                Label("Add Object Mask (AI)", systemImage: "wand.and.rays")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .padding(.vertical, 2)
             Button {
                 presetSaveSource = .allActiveStages
                 newPresetName = "Preset"
@@ -306,6 +290,17 @@ struct StagesSidebarView: View {
                 .multilineTextAlignment(.trailing)
         }
         .font(.caption)
+    }
+
+    private func maskBarButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14))
+                .frame(width: 28, height: 28)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(help)
     }
 
     private func row(for stage: Stage, title: String) -> some View {

@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import AppKit
+import CoreText
 import PhotoCatalog
 
 /// Forces the whole app's AppKit-drawn chrome (title bar, toolbar, and — the one
@@ -16,6 +17,21 @@ import PhotoCatalog
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        registerBundledFonts()
+    }
+
+    /// Registers `Fonts/ScoutieSans.ttf` — a variable font (weight 200...800 plus italics), used
+    /// for every module/section header (`Font.scoutieSans(_:relativeTo:)` in `EditorControls
+    /// .swift`) — for this process only (`.process`, not `.persistent`) — the font never needs to
+    /// be visible to other apps or survive past this run, so there's no reason to install it
+    /// system-wide or touch Font Book. Registering programmatically here, rather than via an
+    /// `ATSApplicationFontsPath` Info.plist entry, sidesteps needing a custom `INFOPLIST_KEY_*`
+    /// build setting in `project.yml` for a key `GENERATE_INFOPLIST_FILE`'s synthesis doesn't have
+    /// a dedicated, well-documented mapping for. Unrelated to the toolbar wordmark, which is a
+    /// static SVG (baked vector paths, from a different face) and needs no font registered at all.
+    private func registerBundledFonts() {
+        guard let url = Bundle.main.url(forResource: "ScoutieSans", withExtension: "ttf") else { return }
+        CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
     }
 }
 

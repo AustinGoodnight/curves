@@ -616,6 +616,13 @@ private final class RecursiveImportOption {
 /// — `apply()` retries every 0.05s (capped) until the window actually exists, and `updateNSView`
 /// re-applies on every SwiftUI update pass so a window-recreation (fullscreen/Space changes on some
 /// macOS versions do this) can't silently drop the override again.
+///
+/// `updateNSView` alone still isn't a complete guarantee — it only reruns when *SwiftUI* decides
+/// this view's inputs changed, not on every AppKit-level event that can reset a window's own
+/// background (a plain resize, becoming key again after losing it, moving to a different screen).
+/// The `Coordinator` additionally observes those window notifications directly and reapplies on
+/// each one, so a stale system-grey toolbar from one of those events self-heals without needing an
+/// unrelated SwiftUI state change to happen to trigger `updateNSView` first.
 private struct WindowBackgroundConfigurator: NSViewRepresentable {
     /// Passed in from `ContentView` (`colorScheme.sidebarBackground`) rather than read as a fixed
     /// constant — `updateNSView` already re-applies on every SwiftUI update pass (see below), so a
@@ -630,7 +637,10 @@ private struct WindowBackgroundConfigurator: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         apply(to: nsView, attempt: 0)
+        context.coordinator.observe(nsView, color: color)
     }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     private func apply(to view: NSView, attempt: Int) {
         guard let window = view.window else {
@@ -640,8 +650,56 @@ private struct WindowBackgroundConfigurator: NSViewRepresentable {
             }
             return
         }
+        Self.style(window, color: color)
+    }
+
+    fileprivate static func style(_ window: NSWindow, color: Color) {
         window.appearance = NSAppearance(named: .darkAqua)
         window.titlebarAppearsTransparent = true
         window.backgroundColor = NSColor(color)
+    }
+
+    final class Coordinator {
+        private var observedWindow: NSWindow?
+        private var tokens: [NSObjectProtocol] = []
+
+        /// Re-registers only when `view.window` actually changed identity (a resize/key/screen
+        /// notification would otherwise be registered again on every single SwiftUI update pass,
+        /// piling up duplicate observers forever).
+        func observe(_ view: NSView, color: Color) {
+            guard let window = view.window, window !== observedWindow else { return }
+            tokens.forEach(NotificationCenter.default.removeObserver)
+            tokens.removeAll()
+            observedWindow = window
+            let center = NotificationCenter.default
+            for name in [NSWindow.didResizeNotification, NSWindow.didBecomeKeyNotification, NSWindow.didChangeScreenNotification] {
+                let token = center.addObserver(forName: name, object: window, queue: .main) { [weak window] _ in
+                    guard let window else { return }
+                    WindowBackgroundConfigurator.style(window, color: color)
+                }
+                tokens.append(token)
+            }
+            // The actual, confirmed trigger (per direct user report, not assumed): entering
+            // fullscreen specifically, not just any resize — `didResizeNotification` above fires
+            // during the fullscreen transition too, but AppKit's own transition animation appears
+            // to repaint the toolbar *after* that, silently reasserting its default system
+            // material. Reapplying again shortly after `didEnterFullScreenNotification` (once that
+            // animation has actually finished, not mid-flight) is what actually sticks.
+            for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+                let token = center.addObserver(forName: name, object: window, queue: .main) { [weak window] _ in
+                    guard let window else { return }
+                    WindowBackgroundConfigurator.style(window, color: color)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak window] in
+                        guard let window else { return }
+                        WindowBackgroundConfigurator.style(window, color: color)
+                    }
+                }
+                tokens.append(token)
+            }
+        }
+
+        deinit {
+            tokens.forEach(NotificationCenter.default.removeObserver)
+        }
     }
 }

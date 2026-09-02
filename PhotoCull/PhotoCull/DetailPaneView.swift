@@ -335,14 +335,26 @@ struct ModeSwitcherControl: View {
     @Bindable var store: DetailStore
     @Environment(ColorSchemeStore.self) private var uiColors
 
+    /// No background at all — even the `colorZonesChannelSwitcher`-style "filled pill when
+    /// selected" pattern still reads as its own boxed control sitting on the toolbar, since that
+    /// pill sits on a `Color.primary.opacity(0.06)` backing rather than the toolbar's own
+    /// background. `EditorView.previewOverlayToolbar`'s icon buttons are this app's actual
+    /// flattest precedent — plain text/icon, no background, state conveyed purely by color, tool
+    /// clusters separated by a bare `Divider()` — so this now matches that instead.
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(GridMode.allCases) { mode in
+        HStack(spacing: 10) {
+            ForEach(Array(GridMode.allCases.enumerated()), id: \.element) { index, mode in
+                if index > 0 {
+                    Divider().frame(height: 14)
+                }
                 tab(mode)
             }
         }
-        .padding(2)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        // Without a background, there's no visual box whose own padding would naturally hold this
+        // off the toolbar's trailing edge (unlike the old boxed-pill version) — it renders flush
+        // against the window's edge otherwise, since this is the last item in `ContentView
+        // .toolbarContent`.
+        .padding(.trailing, 64)
     }
 
     private func tab(_ mode: GridMode) -> some View {
@@ -353,12 +365,6 @@ struct ModeSwitcherControl: View {
             Text(mode.rawValue)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(isSelected ? uiColors.accentColor : Color.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .background(
-                    isSelected ? uiColors.accentColor.opacity(0.15) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 6)
-                )
         }
         .buttonStyle(.plain)
     }

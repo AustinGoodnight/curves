@@ -4,6 +4,27 @@ import SwiftUI
 /// `ColorBalanceBarView`). Free functions rather than methods on any one view, since more than one
 /// of those clusters uses them.
 
+extension Font {
+    /// The app's own brand face for UI chrome — registered for this process at launch
+    /// (`PhotoCullApp.AppDelegate.registerBundledFonts`) from a variable font (weight 200...800).
+    /// Used for every module/section header (`sectionTitle`) so the editor's own chrome reads as a
+    /// distinct type family from the system font. Unrelated to the toolbar wordmark (a static SVG
+    /// built from a different face — see `ContentView.toolbarContent`'s `.principal` item) —
+    /// there's no requirement the two match. `relativeTo:` keeps these scaling with Dynamic Type
+    /// the same way the system text style they're replacing (`.subheadline`/`.caption`) would have.
+    ///
+    /// Pass a real named-instance PostScript name (`"ScoutieSans-Regular"`, `"ScoutieSans-
+    /// SemiBold"`, etc. — see the font's own `fvar` table for the full list) rather than
+    /// `.custom("ScoutieSans-Regular", ...).weight(.semibold)`: this predecessor's replaced face
+    /// (Marmelad) only shipped one weight, so getting a bolder header meant asking macOS to
+    /// synthesize a faux-bold by artificially thickening strokes — passable at display sizes, ugly
+    /// at small ones. Scoutie Sans actually ships a SemiBold instance, so asking for it directly
+    /// gives a real, properly hinted bold design instead of a synthesized one.
+    static func scoutieSans(_ postScriptName: String, size: CGFloat, relativeTo style: Font.TextStyle) -> Font {
+        .custom(postScriptName, size: size, relativeTo: style)
+    }
+}
+
 func resetButton(disabled: Bool, action: @escaping () -> Void) -> some View {
     Button(action: action) {
         Image(systemName: "arrow.counterclockwise.circle.fill")
@@ -22,7 +43,9 @@ func resetButton(disabled: Bool, action: @escaping () -> Void) -> some View {
 /// (Filmic RGB, Curve, Color Balance RGB, …) — `ColorBalanceBarView` overrides it smaller for
 /// "Color Zones"/"Film Simulation" so they read as the same weight as its own `titledGroup` labels
 /// (WB/Color Wheels/Balance) sharing that row, rather than needing a second near-duplicate helper.
-func sectionTitle(_ title: String, enabled: Binding<Bool>?, font: Font = .subheadline.weight(.semibold)) -> some View {
+func sectionTitle(
+    _ title: String, enabled: Binding<Bool>?, font: Font = .scoutieSans("ScoutieSans-Regular", size: 13, relativeTo: .subheadline)
+) -> some View {
     Text(title)
         .font(font)
         .foregroundStyle(.secondary)
@@ -73,7 +96,7 @@ func slider(
     VStack(alignment: .leading, spacing: 4) {
         HStack {
             Text(title)
-                .font(.caption)
+                .font(.scoutieSans("ScoutieSans-Regular", size: 12, relativeTo: .caption))
                 .foregroundStyle(.secondary)
             Spacer()
             Text(value.wrappedValue, format: .number.precision(.fractionLength(2)))

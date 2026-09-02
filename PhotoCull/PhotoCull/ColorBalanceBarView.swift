@@ -61,7 +61,10 @@ struct ColorBalanceBarView: View {
     /// Height of `colorZonesSection`'s picker/reset/toggle toolbar row — a segmented `Picker` at
     /// default control size. Purely cosmetic now (a stable row height rather than one that shifts
     /// with control metrics); cross-section vertical alignment is handled by `.contentTop`
-    /// instead, not by matching this number against anything.
+    /// instead, not by matching this number against anything. Back to this file's original 24pt —
+    /// Scoutie Sans's headers are back to the system font's own 12-13pt sizes too (unlike Marmelad,
+    /// a display face that needed real size to read as intended, Scoutie Sans is a proper UI face
+    /// and holds up fine at small sizes), so there's no longer anything taller to fit in this row.
     private let colorZonesToolbarHeight: CGFloat = 24
 
     var body: some View {
@@ -319,7 +322,7 @@ struct ColorBalanceBarView: View {
                 if enabled != nil {
                     Color.clear.frame(width: stoplightHitDiameter, height: stoplightHitDiameter)
                 }
-                sectionTitle(title, enabled: enabled, font: .caption.weight(.semibold))
+                sectionTitle(title, enabled: enabled, font: .scoutieSans("ScoutieSans-Regular", size: 12, relativeTo: .caption))
                 if let enabled {
                     StoplightToggle(isOn: enabled)
                 }
@@ -514,7 +517,7 @@ struct ColorBalanceBarView: View {
             // depending on how wide "Color Zones" happens to render.
             ZStack {
                 HStack(spacing: 8) {
-                    sectionTitle("Color Zones", enabled: stageBoolBind(\.editColorZonesEnabled), font: .caption.weight(.semibold))
+                    sectionTitle("Color Zones", enabled: stageBoolBind(\.editColorZonesEnabled), font: .scoutieSans("ScoutieSans-Regular", size: 12, relativeTo: .caption))
                         .fixedSize()
                     Spacer(minLength: 0)
                 }
@@ -639,7 +642,7 @@ struct ColorBalanceBarView: View {
             HStack(spacing: 4) {
                 sectionTitle(
                     "Film Simulation", enabled: stage.lut3DData != nil ? stageBoolBind(\.editLUT3DEnabled) : nil,
-                    font: .caption.weight(.semibold)
+                    font: .scoutieSans("ScoutieSans-Regular", size: 12, relativeTo: .caption)
                 )
                 resetButton(disabled: !lut3DHasAdjustments(stage), action: {
                     resetLUT3D(stage)

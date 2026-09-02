@@ -192,6 +192,13 @@ struct EditorView: View {
                 EditorSidebarView(asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator, history: history)
             }
 
+            // The `HSplitView` above and `ColorBalanceBarView` below both sit on the same
+            // `sidebarBackground` fill, so without a seam here the bottom bar reads as a
+            // continuation of the sidebars above it rather than its own region. Safe to add back
+            // now — `ColorBalanceBarView.body`'s `.fixedSize(vertical:)` guard (see its own doc
+            // comment) is exactly the insurance put in place for this.
+            Divider()
+
             ColorBalanceBarView(
                 asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator, history: history,
                 wheelDiameter: wheelDiameter
@@ -329,7 +336,6 @@ private struct ZoomableImagePane: View {
 
     @State private var zoomScale: CGFloat = 1
     @State private var panOffset: CGSize = .zero
-    @State private var gestureZoomScale: CGFloat = 1
     @State private var gesturePanOffset: CGSize = .zero
 
     private let minZoom: CGFloat = 1
@@ -342,70 +348,112 @@ private struct ZoomableImagePane: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let effectiveZoom = zoomScale * gestureZoomScale
-            Image(decorative: previewImage, scale: 1)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .scaleEffect(effectiveZoom)
-                .offset(
-                    x: panOffset.width + gesturePanOffset.width,
-                    y: panOffset.height + gesturePanOffset.height
-                )
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .clipped()
-                .contentShape(Rectangle())
-                .gesture(
-                    MagnificationGesture()
-                        .onChanged { value in
-                            gestureZoomScale = value
-                        }
-                        .onEnded { value in
-                            zoomScale = min(maxZoom, max(minZoom, zoomScale * value))
-                            gestureZoomScale = 1
-                            panOffset = clampedPan(panOffset, zoom: zoomScale, containerSize: geometry.size)
-                        }
-                )
-                .simultaneousGesture(
-                    DragGesture()
-                        .onChanged { value in
-                            gesturePanOffset = value.translation
-                        }
-                        .onEnded { value in
-                            panOffset = clampedPan(
-                                CGSize(width: panOffset.width + value.translation.width, height: panOffset.height + value.translation.height),
-                                zoom: zoomScale, containerSize: geometry.size
-                            )
-                            gesturePanOffset = .zero
-                        }
-                )
-                .simultaneousGesture(
-                    SpatialTapGesture(count: 2)
-                        .onEnded { _ in
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                if zoomScale > minZoom + 0.01 {
-                                    zoomScale = minZoom
-                                    panOffset = .zero
-                                } else {
-                                    zoomScale = doubleClickZoom
-                                    panOffset = clampedPan(.zero, zoom: doubleClickZoom, containerSize: geometry.size)
+            let baseFitRect = Self.aspectFitRect(imageSize: imageSize, in: geometry.size)
+            ZStack {
+                Image(decorative: previewImage, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .scaleEffect(zoomScale)
+                    .offset(
+                        x: panOffset.width + gesturePanOffset.width,
+                        y: panOffset.height + gesturePanOffset.height
+                    )
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        DragGesture()
+                            .onChanged { value in
+                                gesturePanOffset = value.translation
+                            }
+                            .onEnded { value in
+                                panOffset = clampedPan(
+                                    CGSize(width: panOffset.width + value.translation.width, height: panOffset.height + value.translation.height),
+                                    zoom: zoomScale, containerSize: geometry.size
+                                )
+                                gesturePanOffset = .zero
+                            }
+                    )
+                    .simultaneousGesture(
+                        SpatialTapGesture(count: 2)
+                            .onEnded { value in
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    if zoomScale > minZoom + 0.01 {
+                                        zoomScale = minZoom
+                                        panOffset = .zero
+                                    } else {
+                                        setZoom(doubleClickZoom, anchor: value.location, baseFitRect: baseFitRect, containerSize: geometry.size)
+                                    }
                                 }
                             }
-                        }
-                )
+                    )
 
-            if zoomScale > minZoom + 0.01 {
-                Text("\(Int(zoomScale * 100))%")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.thinMaterial, in: Capsule())
-                    .padding(12)
-                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .bottomTrailing)
-                    .allowsHitTesting(false)
+                // Pinch (`NSEvent.magnify` via `MagnifyCatcher`, not SwiftUI's `MagnificationGesture`
+                // — that gesture reports only a scale factor with no location, so it can't anchor the
+                // zoom on the cursor) — same approach as `ZoomPanState`'s overlay editors, see its doc
+                // comment for why.
+                MagnifyCatcher { delta, location in
+                    setZoom(zoomScale * (1 + delta), anchor: location, baseFitRect: baseFitRect, containerSize: geometry.size)
+                }
+
+                if zoomScale > minZoom + 0.01 {
+                    Text("\(Int(zoomScale * 100))%")
+                        .font(.caption)
+                        .monospacedDigit()
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.thinMaterial, in: Capsule())
+                        .padding(12)
+                        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .bottomTrailing)
+                        .allowsHitTesting(false)
+                }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .padding()
+    }
+
+    private static func aspectFitRect(imageSize: CGSize, in containerSize: CGSize) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0, containerSize.width > 0, containerSize.height > 0 else {
+            return CGRect(origin: .zero, size: containerSize)
+        }
+        let scale = min(containerSize.width / imageSize.width, containerSize.height / imageSize.height)
+        let fittedSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let origin = CGPoint(x: (containerSize.width - fittedSize.width) / 2, y: (containerSize.height - fittedSize.height) / 2)
+        return CGRect(origin: origin, size: fittedSize)
+    }
+
+    /// The rect the image is actually drawn in right now, given the plain 1x `baseFitRect` and the
+    /// current `zoomScale`/`panOffset` — mirrors `ZoomPanState.apply(to:)`, needed here to solve for
+    /// where the cursor sits within the *currently displayed* image when anchoring a new zoom.
+    private func zoomedFitRect(baseFitRect: CGRect) -> CGRect {
+        let scaledSize = CGSize(width: baseFitRect.width * zoomScale, height: baseFitRect.height * zoomScale)
+        let center = CGPoint(x: baseFitRect.midX + panOffset.width, y: baseFitRect.midY + panOffset.height)
+        return CGRect(x: center.x - scaledSize.width / 2, y: center.y - scaledSize.height / 2, width: scaledSize.width, height: scaledSize.height)
+    }
+
+    /// Sets zoom to `newScale` (clamped to `minZoom...maxZoom`) while keeping the image point
+    /// currently under `anchor` fixed on screen — same solve as `ZoomPanState.magnify(by:anchor:baseFitRect:)`:
+    /// writing `u` for `anchor`'s fractional position within the *old* zoomed rect, the new center
+    /// must satisfy `newCenter + newSize*(0.5 - u) == anchor`.
+    private func setZoom(_ newScale: CGFloat, anchor: CGPoint, baseFitRect: CGRect, containerSize: CGSize) {
+        guard baseFitRect.width > 0, baseFitRect.height > 0 else { return }
+        let oldFitRect = zoomedFitRect(baseFitRect: baseFitRect)
+        guard oldFitRect.width > 0, oldFitRect.height > 0 else { return }
+        let u = CGPoint(x: (anchor.x - oldFitRect.minX) / oldFitRect.width, y: (anchor.y - oldFitRect.minY) / oldFitRect.height)
+        let clampedScale = min(maxZoom, max(minZoom, newScale))
+        guard clampedScale > minZoom + 0.001 else {
+            zoomScale = minZoom
+            panOffset = .zero
+            return
+        }
+        let newSize = CGSize(width: baseFitRect.width * clampedScale, height: baseFitRect.height * clampedScale)
+        let newCenter = CGPoint(x: anchor.x + newSize.width * (0.5 - u.x), y: anchor.y + newSize.height * (0.5 - u.y))
+        zoomScale = clampedScale
+        panOffset = clampedPan(
+            CGSize(width: newCenter.x - baseFitRect.midX, height: newCenter.y - baseFitRect.midY),
+            zoom: clampedScale, containerSize: containerSize
+        )
     }
 
     /// Clamps `offset` so the zoomed image never pans far enough to leave a gap between its edge
