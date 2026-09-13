@@ -77,10 +77,13 @@ public final class RawImageRenderer {
         }
     }
 
-    /// Runs one stage's six kernel passes (Dehaze → Filmic → ColorBalance → ColorZones →
+    /// Runs one stage's kernel passes (Dehaze → Filmic-or-AgX → ColorBalance → ColorZones →
     /// RGBCurve → LUT3D, each skipped when `nil`) on top of `image`. Called once per active
     /// stage, in stack order, with each call's result feeding the next — a real sequential
     /// composite, not a merged parameter set (see `StageParameters`'s doc comment for why).
+    /// Filmic and AgX are alternative tone mappers for the same slot — `else if` is a defensive
+    /// backstop so the two can never both run on one stage even if `filmicRGB`/`agx` ever
+    /// disagree; the app target's UI is what actually keeps them mutually exclusive.
     private func applyStage(_ params: StageParameters, to image: CIImage) -> CIImage {
         var output = image
         if let dehaze = params.dehaze {
@@ -88,6 +91,8 @@ public final class RawImageRenderer {
         }
         if let filmicRGB = params.filmicRGB {
             output = FilmicRGBKernel.apply(to: output, params: filmicRGB)
+        } else if let agx = params.agx {
+            output = AgXKernel.apply(to: output, params: agx)
         }
         if let colorBalanceRGB = params.colorBalanceRGB {
             output = ColorBalanceRGBKernel.apply(to: output, params: colorBalanceRGB)

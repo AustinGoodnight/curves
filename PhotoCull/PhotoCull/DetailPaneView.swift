@@ -38,6 +38,7 @@ final class DetailStore {
     var isCullingViewActive: Bool = false
     var ratingFilter: Int = 0
     var flagFilter: FlagState?
+    var fileTypeFilter: FileTypeFilter = .all
     var sortOption: SortOption = .captureDateDesc
     var refreshTrigger = 0
     /// Which stacks are shown expanded (all members visible) vs collapsed (one cover cell) — used
@@ -80,6 +81,23 @@ final class DetailStore {
         scenesInCommonSession = scenes.filter { $0.session?.id == first.id }
     }
 
+    /// The rating/flag/file-type filters, independent of the scene/session scoping
+    /// `refreshFilteredAssets` also applies — shared with `SessionFilmstripView`, which is scoped to
+    /// the open photo's session rather than the active scene/session selection but should still
+    /// respect the same rating/flag/file-type filters as the grid.
+    func passesActiveFilters(_ asset: PhotoAsset) -> Bool {
+        if ratingFilter > 0, asset.rating < ratingFilter { return false }
+        if let flagFilter, asset.flag != flagFilter { return false }
+        switch fileTypeFilter {
+        case .all:
+            return true
+        case .raw:
+            return RawFileType.extensions.contains(asset.fileExtension.lowercased())
+        case .jpeg:
+            return ["jpg", "jpeg"].contains(asset.fileExtension.lowercased())
+        }
+    }
+
     /// Cached, not computed. Callable from `ContentView`'s own mutation functions, since those
     /// mutate `allAssets` in ways that can change the answer.
     func refreshFilteredAssets(allAssets: [PhotoAsset], selectedScene: PhotoScene?, selectedSession: Session?) {
@@ -89,12 +107,7 @@ final class DetailStore {
         } else if let selectedSession {
             result = result.filter { $0.session?.id == selectedSession.id }
         }
-        if ratingFilter > 0 {
-            result = result.filter { $0.rating >= ratingFilter }
-        }
-        if let flagFilter {
-            result = result.filter { $0.flag == flagFilter }
-        }
+        result = result.filter { passesActiveFilters($0) }
         switch sortOption {
         case .captureDateDesc:
             result.sort { ($0.captureDate ?? $0.importDate) > ($1.captureDate ?? $1.importDate) }
@@ -171,6 +184,15 @@ enum DisplayItem: Identifiable {
         case .stackMember(let asset, _, _): return "member-\(asset.id)"
         }
     }
+}
+
+/// `RawFileType.extensions` (from `PhotoCatalog`) is the source of truth for what counts as RAW;
+/// `.jpeg` here matches both `jpg`/`jpeg` extensions.
+enum FileTypeFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case raw = "RAW"
+    case jpeg = "JPEG"
+    var id: String { rawValue }
 }
 
 enum SortOption: String, CaseIterable, Identifiable {
@@ -251,27 +273,7 @@ struct GridPane: View, Equatable {
     }
 }
 
-/// Pulled out of `ContentView.toolbarContent` on purpose — it's one of two toolbar items
-/// (alongside `OrganizeMenu`) that read a `store` property as a *value* (`store.selection.count`)
-/// rather than just forwarding a `Binding`. As its own `View`, only *this* small view's `body`
-/// re-runs when `store.selection` changes. `onEdit` is a closure, not `allAssets` as a separate
-/// value parameter — see `DetailStore`'s doc comment on why passing `allAssets` down as a value
-/// (forcing a read of it at *construction* time) is the trap this avoids.
-struct EditButton: View {
-    @Bindable var store: DetailStore
-    var onEdit: () -> Void
-
-    var body: some View {
-        Button {
-            onEdit()
-        } label: {
-            Label("Edit…", systemImage: "slider.horizontal.3")
-        }
-        .disabled(store.selection.count != 1)
-    }
-}
-
-/// Pulled out of `ContentView.toolbarContent` on purpose, same reasoning as `EditButton` — this
+/// Pulled out of `ContentView.toolbarContent` on purpose — this
 /// reads `store.ratingFilter` as a value, so as its own `View` type only *this* small view's
 /// `body` re-runs when the rating filter changes. Five stars, shown inline in the toolbar rather
 /// than behind a menu, set a *minimum* rating (Lightroom-style): tapping star N shows N+ stars;
@@ -291,6 +293,10 @@ struct RatingFilterControl: View {
                 .foregroundStyle(star <= store.ratingFilter ? Color.yellow : Color.secondary)
             }
         }
+        // The star glyphs sit slightly high relative to the toolbar's other text/icon controls —
+        // a few px of bottom padding nudges this row down so it reads as vertically inline with
+        // its neighbors instead of floating a bit above them.
+        .padding(.bottom, 3)
         .help("Filter by minimum rating")
     }
 }
@@ -303,9 +309,9 @@ struct FlagFilterControl: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            flagButton(.pick, systemImage: "flag.fill", color: .green, help: "Picked")
-            flagButton(.reject, systemImage: "flag.slash.fill", color: .red, help: "Rejected")
-            flagButton(.none, systemImage: "flag", color: .secondary, help: "Unflagged")
+            flagButton(.pick, systemImage: "checkmark", color: .green, help: "Picked")
+            flagButton(.reject, systemImage: "xmark", color: .red, help: "Rejected")
+            flagButton(.none, systemImage: "circle", color: .secondary, help: "Unflagged")
         }
     }
 
@@ -322,6 +328,38 @@ struct FlagFilterControl: View {
     }
 }
 
+/// Pulled out of `ContentView.toolbarContent` on purpose, same reasoning as `RatingFilterControl`
+/// — reads `store.fileTypeFilter` as a value. Two toggle buttons shown inline, same "tap the active
+/// one again to clear back to All" convention as `FlagFilterControl`, rather than a `Menu`/`Picker`
+/// dropdown — RAW/JPG read directly off the toolbar instead of needing a click to reveal them, and
+/// it keeps this control visually consistent with `RatingFilterControl`/`FlagFilterControl` beside
+/// it rather than picking up a `Menu`'s default accent-tinted icon (see `uiColors.accentColor` used
+/// for the *selected* state below, same as everywhere else in the app that marks a selection).
+struct FileTypeFilterControl: View {
+    @Bindable var store: DetailStore
+    @Environment(ColorSchemeStore.self) private var uiColors
+
+    var body: some View {
+        HStack(spacing: 6) {
+            fileTypeButton(.raw, label: "RAW")
+            fileTypeButton(.jpeg, label: "JPG")
+        }
+    }
+
+    private func fileTypeButton(_ type: FileTypeFilter, label: String) -> some View {
+        let isSelected = store.fileTypeFilter == type
+        return Button {
+            store.fileTypeFilter = isSelected ? .all : type
+        } label: {
+            Text(label)
+                .font(.caption.weight(.semibold))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? uiColors.accentColor : Color.secondary)
+        .help("Show only \(label) photos")
+    }
+}
+
 /// Pulled out of `ContentView.toolbarContent` on purpose, same reasoning as `RatingFilterControl` —
 /// reads `store.gridMode` as a value. Replaces a stock `Picker(.segmented)` with the same "plain
 /// text, filled pill when selected" tab language `ColorBalanceBarView`'s `colorZonesChannelSwitcher`/
@@ -333,78 +371,74 @@ struct FlagFilterControl: View {
 /// "Done" button).
 struct ModeSwitcherControl: View {
     @Bindable var store: DetailStore
-    @Environment(ColorSchemeStore.self) private var uiColors
 
-    /// No background at all — even the `colorZonesChannelSwitcher`-style "filled pill when
-    /// selected" pattern still reads as its own boxed control sitting on the toolbar, since that
-    /// pill sits on a `Color.primary.opacity(0.06)` backing rather than the toolbar's own
-    /// background. `EditorView.previewOverlayToolbar`'s icon buttons are this app's actual
-    /// flattest precedent — plain text/icon, no background, state conveyed purely by color, tool
-    /// clusters separated by a bare `Divider()` — so this now matches that instead.
+    /// One flat text button, not a two-tab switcher — labeled with the *destination*, not the
+    /// current mode: "Edit" while in Sessions (tap to open the editor for the current selection),
+    /// "Session" while in Edit (tap to close it). Reads as one more plain-text action alongside
+    /// RAW/JPG, Stack/Scene, and Sort, rather than a distinct piece of chrome.
     var body: some View {
-        HStack(spacing: 10) {
-            ForEach(Array(GridMode.allCases.enumerated()), id: \.element) { index, mode in
-                if index > 0 {
-                    Divider().frame(height: 14)
-                }
-                tab(mode)
-            }
-        }
-        // Without a background, there's no visual box whose own padding would naturally hold this
-        // off the toolbar's trailing edge (unlike the old boxed-pill version) — it renders flush
-        // against the window's edge otherwise, since this is the last item in `ContentView
-        // .toolbarContent`.
-        .padding(.trailing, 64)
-    }
-
-    private func tab(_ mode: GridMode) -> some View {
-        let isSelected = store.gridMode == mode
-        return Button {
-            store.gridMode = mode
+        Button {
+            store.gridMode = store.gridMode == .sessions ? .edit : .sessions
         } label: {
-            Text(mode.rawValue)
+            Text(store.gridMode == .sessions ? "Edit" : "Session")
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(isSelected ? uiColors.accentColor : Color.secondary)
+                .foregroundStyle(Color.secondary)
         }
         .buttonStyle(.plain)
+        // There's no visual box whose own padding would naturally hold this off the toolbar's
+        // trailing edge — it renders flush against the window's edge otherwise, since this is the
+        // last item in `ContentView.toolbarContent`.
+        .padding(.trailing, 64)
     }
 }
 
-/// Pulled out of `ContentView.toolbarContent` on purpose — it's the only piece of the toolbar
-/// that reads `store.commonSessionForSelection`/`store.scenesInCommonSession`, and those are
-/// mutated a beat *after* `store.selection` itself, via `refreshSelectionDerivedState()` running
-/// from `ContentView`'s `.onChange(of: store.selection)`. As its own `View`, only *this* small
-/// view's `body` re-runs when those two properties change.
-struct OrganizeMenu: View {
+/// Pulled out of `ContentView.toolbarContent` on purpose, same reasoning as `RatingFilterControl`
+/// — reads `store.selection` as a value. "Stack"/"Scene" are one-shot actions, not toggles like
+/// RAW/JPG, but styled identically (same per-button helper shape, `.buttonStyle(.plain)`, `.caption`
+/// weight-semibold text, `HStack(spacing: 6)`) for visual consistency across the toolbar's flat text
+/// controls — the only difference is which state each button's dim/bright color reflects (an
+/// enabled/disabled action here, a selected/unselected filter there).
+///
+/// Both skip the "which one?" step a `Menu` would otherwise need: "Stack" always groups the current
+/// selection into a *new* stack (never "which stack"), and "Scene" always creates a *new* scene from
+/// the selection (`onNewScene`, the same action `ContentView`'s "New Scene…" alert already drives) —
+/// never a picker over existing scenes. Adding to an *existing* scene still has its own path
+/// (⌘S → `ScenePickerSheet`, see `ContentView`'s hidden "Add Selected to Scene" button), so nothing
+/// here is lost, just moved out of this cluster.
+struct StackSceneControl: View {
     @Bindable var store: DetailStore
-    let selectedScene: PhotoScene?
     var onGroupStack: () -> Void
-    var onUnstack: () -> Void
-    var onAddSelected: (PhotoScene) -> Void
     var onNewScene: () -> Void
-    var onRemoveFromScene: () -> Void
 
     var body: some View {
-        Menu {
-            Button("Group Selected into Stack (G)") { onGroupStack() }
-                .disabled(store.selection.count < 2)
-            Button("Unstack Selected (⇧G)") { onUnstack() }
-                .disabled(store.selection.isEmpty)
-            Divider()
-            Menu("Add Selected to Scene") {
-                ForEach(store.scenesInCommonSession) { scene in
-                    Button(scene.name) { onAddSelected(scene) }
-                }
-                if !store.scenesInCommonSession.isEmpty { Divider() }
-                Button("New Scene…") { onNewScene() }
-            }
-            .disabled(store.commonSessionForSelection == nil)
-            if selectedScene != nil {
-                Button("Remove Selected from This Scene") { onRemoveFromScene() }
-                    .disabled(store.selection.isEmpty)
-            }
-        } label: {
-            Label("Organize", systemImage: "square.stack.3d.up")
+        HStack(spacing: 6) {
+            actionButton("Stack", enabled: store.selection.count >= 2, help: "Group Selected into Stack (G)", action: onGroupStack)
+            // Same thin-vertical-bar treatment as `ContentView.toolbarDivider`, inlined here since
+            // this pair sits inside one `ToolbarItem`, not two separate ones a divider could go
+            // between.
+            Rectangle()
+                .fill(Color.secondary.opacity(0.35))
+                .frame(width: 1, height: 14)
+            actionButton("Scene", enabled: !store.selection.isEmpty, help: "New Scene from Selection…", action: onNewScene)
         }
+    }
+
+    /// `enabled` gates the tap from *inside* the action closure rather than via SwiftUI's
+    /// `.disabled(_:)` — that modifier layers its own automatic dimming on top of whatever
+    /// `.foregroundStyle` is already set, which made the "not actionable" state noticeably darker
+    /// than `FileTypeFilterControl`'s equivalent un-selected `Color.secondary` (never `.disabled()`
+    /// itself) even though both nominally used the same color. Skipping `.disabled()` here keeps the
+    /// two controls' resting colors pixel-identical.
+    private func actionButton(_ label: String, enabled: Bool, help: String, action: @escaping () -> Void) -> some View {
+        Button {
+            guard enabled else { return }
+            action()
+        } label: {
+            Text(label)
+                .font(.caption.weight(.semibold))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(enabled ? Color.primary : Color.secondary)
+        .help(help)
     }
 }

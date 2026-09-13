@@ -17,6 +17,16 @@ struct StageFieldSnapshot: Codable, Equatable {
     var editFilmicSaturation: Double?
     var editFilmicBalance: Double?
 
+    var editAgXEnabled: Bool
+    var editAgXWhitePointSource: Double?
+    var editAgXBlackPointSource: Double?
+    var editAgXContrast: Double?
+    var editAgXSlope: Double?
+    var editAgXLift: Double?
+    var editAgXBrightness: Double?
+    var editAgXSaturation: Double?
+    var editAgXHueMix: Double?
+
     var editColorBalanceEnabled: Bool
     var editColorBalanceGlobalY: Double?
     var editColorBalanceGlobalC: Double?
@@ -77,6 +87,16 @@ struct StageFieldSnapshot: Codable, Equatable {
         editFilmicLatitude = stage.editFilmicLatitude
         editFilmicSaturation = stage.editFilmicSaturation
         editFilmicBalance = stage.editFilmicBalance
+
+        editAgXEnabled = stage.editAgXEnabled
+        editAgXWhitePointSource = stage.editAgXWhitePointSource
+        editAgXBlackPointSource = stage.editAgXBlackPointSource
+        editAgXContrast = stage.editAgXContrast
+        editAgXSlope = stage.editAgXSlope
+        editAgXLift = stage.editAgXLift
+        editAgXBrightness = stage.editAgXBrightness
+        editAgXSaturation = stage.editAgXSaturation
+        editAgXHueMix = stage.editAgXHueMix
 
         editColorBalanceEnabled = stage.editColorBalanceEnabled
         editColorBalanceGlobalY = stage.editColorBalanceGlobalY
@@ -139,6 +159,16 @@ struct StageFieldSnapshot: Codable, Equatable {
         stage.editFilmicLatitude = editFilmicLatitude
         stage.editFilmicSaturation = editFilmicSaturation
         stage.editFilmicBalance = editFilmicBalance
+
+        stage.editAgXEnabled = editAgXEnabled
+        stage.editAgXWhitePointSource = editAgXWhitePointSource
+        stage.editAgXBlackPointSource = editAgXBlackPointSource
+        stage.editAgXContrast = editAgXContrast
+        stage.editAgXSlope = editAgXSlope
+        stage.editAgXLift = editAgXLift
+        stage.editAgXBrightness = editAgXBrightness
+        stage.editAgXSaturation = editAgXSaturation
+        stage.editAgXHueMix = editAgXHueMix
 
         stage.editColorBalanceEnabled = editColorBalanceEnabled
         stage.editColorBalanceGlobalY = editColorBalanceGlobalY
@@ -233,6 +263,16 @@ extension StageFieldSnapshot {
             result.editFilmicSaturation = next.editFilmicSaturation ?? result.editFilmicSaturation
             result.editFilmicBalance = next.editFilmicBalance ?? result.editFilmicBalance
 
+            result.editAgXEnabled = result.editAgXEnabled && next.editAgXEnabled
+            result.editAgXWhitePointSource = next.editAgXWhitePointSource ?? result.editAgXWhitePointSource
+            result.editAgXBlackPointSource = next.editAgXBlackPointSource ?? result.editAgXBlackPointSource
+            result.editAgXContrast = next.editAgXContrast ?? result.editAgXContrast
+            result.editAgXSlope = next.editAgXSlope ?? result.editAgXSlope
+            result.editAgXLift = next.editAgXLift ?? result.editAgXLift
+            result.editAgXBrightness = next.editAgXBrightness ?? result.editAgXBrightness
+            result.editAgXSaturation = next.editAgXSaturation ?? result.editAgXSaturation
+            result.editAgXHueMix = next.editAgXHueMix ?? result.editAgXHueMix
+
             result.editColorBalanceEnabled = result.editColorBalanceEnabled && next.editColorBalanceEnabled
             result.editColorBalanceGlobalY = next.editColorBalanceGlobalY ?? result.editColorBalanceGlobalY
             result.editColorBalanceGlobalC = next.editColorBalanceGlobalC ?? result.editColorBalanceGlobalC
@@ -296,6 +336,13 @@ extension StageFieldSnapshot {
             || editFilmicLatitude != other.editFilmicLatitude || editFilmicSaturation != other.editFilmicSaturation
             || editFilmicBalance != other.editFilmicBalance {
             changed.insert("Filmic RGB")
+        }
+        if editAgXEnabled != other.editAgXEnabled || editAgXWhitePointSource != other.editAgXWhitePointSource
+            || editAgXBlackPointSource != other.editAgXBlackPointSource || editAgXContrast != other.editAgXContrast
+            || editAgXSlope != other.editAgXSlope || editAgXLift != other.editAgXLift
+            || editAgXBrightness != other.editAgXBrightness || editAgXSaturation != other.editAgXSaturation
+            || editAgXHueMix != other.editAgXHueMix {
+            changed.insert("AgX")
         }
         if editColorBalanceEnabled != other.editColorBalanceEnabled
             || editColorBalanceGlobalY != other.editColorBalanceGlobalY || editColorBalanceGlobalC != other.editColorBalanceGlobalC

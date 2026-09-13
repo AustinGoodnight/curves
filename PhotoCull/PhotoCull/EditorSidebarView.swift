@@ -28,7 +28,7 @@ struct EditorSidebarView: View {
     /// Purely local UI state, not persisted: reopening the editor always starts closed, since
     /// "most of the time I leave it at default" was the whole reason for hiding these behind a
     /// dropdown in the first place.
-    @State private var isFilmicPopoverPresented = false
+    @State private var isToneMapperPopoverPresented = false
 
     /// The RGB Curve graph's height, proportional to the sidebar's current width so it grows/
     /// shrinks as the split is dragged instead of staying a fixed 260pt regardless of available
@@ -92,73 +92,127 @@ struct EditorSidebarView: View {
                         ticks: [-0.5, -0.25, 0, 0.25, 0.5], trackStyle: .hairline, thumbShape: .diamond
                     )
                 }
-                // The big "Filmic" area toggles the module on/off (unchanged); the chevron is a
-                // second, separate tap target sharing the same button's fill/text-color state
-                // that opens a popover anchored to the button instead of always showing the five
-                // sub-sliders inline — same "hide it, most of the time I leave it at default"
-                // reasoning the old "Edit" link had, just via a dropdown now instead of expanding
-                // this view's own layout.
-                HStack(spacing: 1) {
-                    Button {
-                        stage.editFilmicEnabled.toggle()
-                        scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
-                    } label: {
-                        Text("Filmic")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        isFilmicPopoverPresented = true
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.caption)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                    }
-                    .buttonStyle(.plain)
-                    .popover(isPresented: $isFilmicPopoverPresented) {
-                        let d = FilmicRGBParameters.darktableDefault
-                        VStack(alignment: .leading, spacing: 10) {
-                            slider(
-                                "White EV", value: stageBind(\.editFilmicWhitePointSource, fallback: d.whitePointSource, module: filmicGate),
-                                range: 2...8, resetValue: d.whitePointSource,
-                                ticks: [2, 3, 4, 5, 6, 7, 8]
-                            )
-                            slider(
-                                "Black EV", value: stageBind(\.editFilmicBlackPointSource, fallback: d.blackPointSource, module: filmicGate),
-                                range: -14 ... -2, resetValue: d.blackPointSource,
-                                ticks: [-14, -12, -10, -8, -6, -4, -2]
-                            )
-                            slider(
-                                "Contrast", value: stageBind(\.editFilmicContrast, fallback: d.contrast, module: filmicGate),
-                                range: 0.5...2, resetValue: d.contrast,
-                                ticks: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
-                            )
-                            slider(
-                                "Latitude", value: stageBind(\.editFilmicLatitude, fallback: d.latitude, module: filmicGate),
-                                range: 0.01...80, resetValue: d.latitude,
-                                ticks: [0, 20, 40, 60, 80]
-                            )
-                            slider(
-                                "Balance", value: stageBind(\.editFilmicBalance, fallback: d.balance, module: filmicGate),
-                                range: -50...50, resetValue: d.balance,
-                                ticks: [-50, -25, 0, 25, 50]
-                            )
+                // Filmic and AgX are alternative tone mappers for the same pipeline slot (see
+                // `RawImageRenderer.applyStage(_:to:)`), so a 3-way segmented picker replaces what
+                // used to be Filmic's own bespoke on/off button — "choose one of the other" reads
+                // more honestly as a single picker than two independently-toggleable rows that
+                // happen to fight over the same slot. The chevron popover pattern is unchanged
+                // (same "hide it, most of the time I leave it at default" reasoning as before),
+                // just showing whichever module's sliders match the current picker selection.
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Picker("Tone Mapper", selection: Binding(
+                            get: { toneMapper(for: stage) },
+                            set: { newValue in
+                                setToneMapper(stage, to: newValue)
+                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                            }
+                        )) {
+                            Text("Off").tag(ToneMapper.off)
+                            Text("Filmic").tag(ToneMapper.filmic)
+                            Text("AgX").tag(ToneMapper.agx)
                         }
-                        .padding()
-                        .frame(width: 260)
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+
+                        if toneMapper(for: stage) != .off {
+                            Button {
+                                isToneMapperPopoverPresented = true
+                            } label: {
+                                Image(systemName: "chevron.down")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                            .popover(isPresented: $isToneMapperPopoverPresented) {
+                                if toneMapper(for: stage) == .filmic {
+                                    let d = FilmicRGBParameters.darktableDefault
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        slider(
+                                            "White EV", value: stageBind(\.editFilmicWhitePointSource, fallback: d.whitePointSource, module: filmicGate),
+                                            range: 2...8, resetValue: d.whitePointSource,
+                                            ticks: [2, 3, 4, 5, 6, 7, 8]
+                                        )
+                                        slider(
+                                            "Black EV", value: stageBind(\.editFilmicBlackPointSource, fallback: d.blackPointSource, module: filmicGate),
+                                            range: -14 ... -2, resetValue: d.blackPointSource,
+                                            ticks: [-14, -12, -10, -8, -6, -4, -2]
+                                        )
+                                        slider(
+                                            "Contrast", value: stageBind(\.editFilmicContrast, fallback: d.contrast, module: filmicGate),
+                                            range: 0.5...2, resetValue: d.contrast,
+                                            ticks: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
+                                        )
+                                        slider(
+                                            "Latitude", value: stageBind(\.editFilmicLatitude, fallback: d.latitude, module: filmicGate),
+                                            range: 0.01...80, resetValue: d.latitude,
+                                            ticks: [0, 20, 40, 60, 80]
+                                        )
+                                        slider(
+                                            "Balance", value: stageBind(\.editFilmicBalance, fallback: d.balance, module: filmicGate),
+                                            range: -50...50, resetValue: d.balance,
+                                            ticks: [-50, -25, 0, 25, 50]
+                                        )
+                                    }
+                                    .padding()
+                                    .frame(width: 260)
+                                } else {
+                                    let d = AgXParameters.darktableDefault
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        slider(
+                                            "White EV", value: stageBind(\.editAgXWhitePointSource, fallback: d.whiteRelativeEV, module: agxGate),
+                                            range: 2...12, resetValue: d.whiteRelativeEV,
+                                            ticks: [2, 4, 6, 8, 10, 12]
+                                        )
+                                        slider(
+                                            "Black EV", value: stageBind(\.editAgXBlackPointSource, fallback: d.blackRelativeEV, module: agxGate),
+                                            range: -16 ... -2, resetValue: d.blackRelativeEV,
+                                            ticks: [-16, -12, -8, -4, -2]
+                                        )
+                                        slider(
+                                            "Contrast", value: stageBind(\.editAgXContrast, fallback: d.contrast, module: agxGate),
+                                            range: 1...6, resetValue: d.contrast,
+                                            ticks: [1, 2, 3, 4, 5, 6]
+                                        )
+                                        slider(
+                                            "Slope", value: stageBind(\.editAgXSlope, fallback: d.lookSlope, module: agxGate),
+                                            range: 0...2, resetValue: d.lookSlope,
+                                            ticks: [0, 0.5, 1, 1.5, 2]
+                                        )
+                                        slider(
+                                            "Lift", value: stageBind(\.editAgXLift, fallback: d.lookLift, module: agxGate),
+                                            range: -0.5...0.5, resetValue: d.lookLift,
+                                            ticks: [-0.5, -0.25, 0, 0.25, 0.5]
+                                        )
+                                        slider(
+                                            "Brightness", value: stageBind(\.editAgXBrightness, fallback: d.lookBrightness, module: agxGate),
+                                            range: 0.25...4, resetValue: d.lookBrightness,
+                                            ticks: [0.25, 1, 2, 3, 4]
+                                        )
+                                        slider(
+                                            "Saturation", value: stageBind(\.editAgXSaturation, fallback: d.lookSaturation, module: agxGate),
+                                            range: 0...2, resetValue: d.lookSaturation,
+                                            ticks: [0, 0.5, 1, 1.5, 2]
+                                        )
+                                        slider(
+                                            "Hue Preservation", value: stageBind(\.editAgXHueMix, fallback: d.lookHueMixRatio, module: agxGate),
+                                            range: 0...1, resetValue: d.lookHueMixRatio,
+                                            ticks: [0, 0.25, 0.5, 0.75, 1]
+                                        )
+                                    }
+                                    .padding()
+                                    .frame(width: 260)
+                                }
+                            }
+                        }
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
                 }
-                .foregroundStyle(stage.editFilmicEnabled ? uiColors.accentColor : Color.secondary)
                 // `uiColors.recessedTrackBackground` — the same fixed dark fill every slider track
-                // and the Curve graph use, replacing the old accent-tinted/plain-primary fills so
-                // this button reads as one more recessed panel in the same family instead of its
-                // own, differently-styled control. Enabled/disabled still comes through via the
-                // text color above, matching how every other module's `StoplightToggle` row keeps
-                // its background neutral and puts the on/off signal in the toggle itself.
+                // and the Curve graph use, so this row reads as one more recessed panel in the same
+                // family instead of its own, differently-styled control. The segmented `Picker`
+                // itself carries the on/off/which-module signal now, so there's no separate
+                // foreground-color toggle state to apply to the row as a whole.
                 .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 10) {
                     // Three independent regions, same technique as `ColorBalanceBarView.colorZonesSection`'s
@@ -267,6 +321,10 @@ struct EditorSidebarView: View {
 
     private var filmicGate: ModuleGate {
         ModuleGate(hasAdjustments: { filmicHasAdjustments(stage) }, setEnabled: { stage.editFilmicEnabled = $0 })
+    }
+
+    private var agxGate: ModuleGate {
+        ModuleGate(hasAdjustments: { agxHasAdjustments(stage) }, setEnabled: { stage.editAgXEnabled = $0 })
     }
 
     private var rgbCurveGate: ModuleGate {

@@ -58,22 +58,26 @@ struct XYWhiteBalanceControl: View {
         .simultaneousGesture(TapGesture(count: 2).onEnded(reset))
     }
 
+    /// Endpoint colors are `.normalizedVividness()`'d the same as every other spectrum control in
+    /// the bottom bar (see `Color.controlSpectrumSaturation`'s doc comment) — this pad additionally
+    /// fades each to `.clear` at 65% opacity (see `background`'s own doc comment above) so the
+    /// vividness match happens on the colors going *into* that fade, not after it.
     private var background: some View {
         ZStack {
             Color(red: 154 / 255, green: 154 / 255, blue: 154 / 255)
             LinearGradient(
                 stops: [
-                    .init(color: Color(red: 10 / 255, green: 132 / 255, blue: 255 / 255).opacity(0.65), location: 0),
+                    .init(color: Color(red: 10 / 255, green: 132 / 255, blue: 255 / 255).normalizedVividness().opacity(0.65), location: 0),
                     .init(color: .clear, location: 0.5),
-                    .init(color: Color(red: 255 / 255, green: 159 / 255, blue: 10 / 255).opacity(0.65), location: 1),
+                    .init(color: Color(red: 255 / 255, green: 159 / 255, blue: 10 / 255).normalizedVividness().opacity(0.65), location: 1),
                 ],
                 startPoint: .bottom, endPoint: .top
             )
             LinearGradient(
                 stops: [
-                    .init(color: Color(red: 48 / 255, green: 209 / 255, blue: 88 / 255).opacity(0.65), location: 0),
+                    .init(color: Color(red: 48 / 255, green: 209 / 255, blue: 88 / 255).normalizedVividness().opacity(0.65), location: 0),
                     .init(color: .clear, location: 0.5),
-                    .init(color: Color(red: 255 / 255, green: 45 / 255, blue: 210 / 255).opacity(0.65), location: 1),
+                    .init(color: Color(red: 255 / 255, green: 45 / 255, blue: 210 / 255).normalizedVividness().opacity(0.65), location: 1),
                 ],
                 startPoint: .leading, endPoint: .trailing
             )

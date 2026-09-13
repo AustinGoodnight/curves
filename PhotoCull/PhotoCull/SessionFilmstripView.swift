@@ -123,8 +123,23 @@ private struct FilmstripThumbnail: View {
 /// Vertical filmstrip of every photo in the current asset's session — lets you jump between photos
 /// without leaving the editor. A distinct panel from `StagesSidebarView`'s "Stack" section: this
 /// one is about *which* photo is open; that one is about a single photo's own edit stack.
+///
+/// `ContentView` constructs this as a sibling of `EditorView`, not as a child of it, specifically so
+/// this view's own identity — and its `ScrollView`'s scroll position — survives switching photos.
+/// `EditorView` carries `.id(editingAsset.id)` to force a fresh copy of *itself* (and its per-photo
+/// `@State`: render coordinator, undo history, selected stage) on every switch; this view has no
+/// such per-photo state to reset, so keeping it outside that `.id()` boundary means clicking a
+/// thumbnail here only updates its `asset`/`onSelectAsset` values in place instead of tearing down
+/// and rebuilding the whole panel — which is also what previously reset its scroll position to the
+/// top on every single click.
 struct SessionFilmstripView: View {
     let asset: PhotoAsset
+    /// Read only for `passesActiveFilters` in `filmstripItems` — the culling view's rating/flag/
+    /// file-type filters, which should also thin out this session-scoped list rather than only
+    /// applying to the grid. A plain `let` (not `@Bindable`) since nothing here writes to it; as its
+    /// own `View` type, reading `store`'s properties still scopes Observation invalidation to just
+    /// this view, not `ContentView`'s.
+    let store: DetailStore
     var onSelectAsset: (PhotoAsset) -> Void
     @Environment(ColorSchemeStore.self) private var uiColors
 
@@ -143,9 +158,17 @@ struct SessionFilmstripView: View {
         var id: UUID { photo.id }
     }
 
+    /// The currently-open `asset` is always kept, even if it no longer passes the active filters
+    /// (e.g. the user changes the file-type filter while a non-matching photo is open) — losing the
+    /// photo you're actively editing out of its own filmstrip would be more surprising than useful.
     private var filmstripItems: [Item] {
         guard let session = asset.session else { return [Item(photo: asset, stackCount: 1)] }
-        let sorted = (session.photos ?? []).sorted { ($0.captureDate ?? $0.importDate) < ($1.captureDate ?? $1.importDate) }
+        let visibleIDs = Set((session.photos ?? [])
+            .filter { store.passesActiveFilters($0) || $0.id == asset.id }
+            .map(\.id))
+        let sorted = (session.photos ?? [])
+            .filter { visibleIDs.contains($0.id) }
+            .sorted { ($0.captureDate ?? $0.importDate) < ($1.captureDate ?? $1.importDate) }
         var seenStacks = Set<UUID>()
         var result: [Item] = []
         for photo in sorted {
@@ -155,7 +178,7 @@ struct SessionFilmstripView: View {
             }
             guard !seenStacks.contains(stack.id) else { continue }
             seenStacks.insert(stack.id)
-            let members = stack.photos ?? []
+            let members = (stack.photos ?? []).filter { visibleIDs.contains($0.id) }
             let containsCurrent = members.contains { $0.id == asset.id }
             result.append(Item(photo: containsCurrent ? asset : photo, stackCount: members.count))
         }

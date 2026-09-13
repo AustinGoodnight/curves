@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 extension Color {
     /// Backdrop behind the photo in `EditorView`'s preview pane — a neutral ~18% gray rather than
@@ -9,4 +10,29 @@ extension Color {
     /// before the user picks a swatch, distinct from the customizable swatches themselves
     /// (`ColorSchemeStore.previewBackgroundPalette`).
     static let editorPreviewBackground = Color(red: 0.18, green: 0.18, blue: 0.18)
+
+    /// The shared saturation/brightness every hue-based control background in `ColorBalanceBarView`
+    /// (the 4 color wheels' arcs, Color Zones' hue-axis strip, the WB/Chr/Vib/Sat gradient faders,
+    /// the XY white balance pad) is normalized onto via `normalizedVividness(_:)` below — matches
+    /// `CurveEditorControl.hueSpectrum`'s existing level, already proven at Color Zones' scale.
+    /// Before this existed, each control picked its own colors independently: the wheels used raw
+    /// `Color(hue:saturation: 1, brightness: 1)`, Color Zones used 0.85/0.95, and the linear faders/
+    /// XY pad used literal Apple system-color RGB triples — whose *own* saturation/brightness varies
+    /// hue to hue (systemGreen's HSB is roughly (0.77, 0.82), notably duller than systemBlue's or
+    /// systemOrange's (~0.96, 1.0)), so the green stop in every gradient that used it read flatter
+    /// than its neighbors even before comparing across controls.
+    static let controlSpectrumSaturation: Double = 0.85
+    static let controlSpectrumBrightness: Double = 0.95
+
+    /// Re-expresses `self` at `controlSpectrumSaturation`/`controlSpectrumBrightness` while keeping
+    /// its hue — lets every gradient/spectrum control keep picking colors by name (`.systemBlue`,
+    /// `.systemGreen`, …, for the direction/meaning each hue already encodes) while actually
+    /// rendering at one shared vividness, rather than inheriting whatever saturation/brightness
+    /// that named color happens to natively have.
+    func normalizedVividness() -> Color {
+        let ns = NSColor(self).usingColorSpace(.deviceRGB) ?? NSColor(self)
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+        ns.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        return Color(hue: Double(hue), saturation: Color.controlSpectrumSaturation, brightness: Color.controlSpectrumBrightness)
+    }
 }

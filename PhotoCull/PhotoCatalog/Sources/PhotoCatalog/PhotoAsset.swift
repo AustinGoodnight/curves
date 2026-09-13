@@ -10,6 +10,13 @@ public final class PhotoAsset {
     public var fileExtension: String = ""
     public var importDate: Date = Date()
     public var captureDate: Date?
+    /// Set each time this photo is *opened* in the editor (`ContentView.openEditor(for:)`), not on
+    /// every slider tick — a per-tick write would fire a SwiftData mutation, and thus a broad
+    /// `@Query` re-fire, on every single drag, which is exactly the write-side mirror of the read-
+    /// side `@Query`-invalidation traps this app's CLAUDE.md documents at length. "Opened for
+    /// editing" is a cheap-to-maintain proxy for "recently edited" — good enough to drive the
+    /// editor sidebar's "Copy from Recent" list (`RecentEditsBrowserView`) without that cost.
+    public var lastEditedDate: Date?
     public var fileSize: Int64 = 0
     public var pixelWidth: Int = 0
     public var pixelHeight: Int = 0
@@ -230,6 +237,15 @@ public final class PhotoAsset {
     public var focalLengthDisplay: String {
         guard focalLength > 0 else { return "" }
         return "\(focalLength.formatted(.number.precision(.fractionLength(0...1))))mm"
+    }
+
+    /// `fileName` with its extension stripped — the key used to match a RAW and a JPG as "the same
+    /// shot" (e.g. "A7C05978.ARW" and "A7C05978.JPG" both give "A7C05978"). `(fileName as NSString)
+    /// .deletingPathExtension` matches the one other ad hoc place in the app that already needed
+    /// this (`ExportSupport.swift`'s renamed-export path), rather than reimplementing it via
+    /// `fileExtension`'s stored length.
+    public var baseFileName: String {
+        (fileName as NSString).deletingPathExtension
     }
 
     /// Bookmarks survive file moves/renames within the same volume; the raw path is the

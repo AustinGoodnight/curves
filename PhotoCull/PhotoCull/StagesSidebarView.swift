@@ -27,6 +27,12 @@ struct StagesSidebarView: View {
     /// Lets a row in the "Stack" section below switch the editor to that photo — see
     /// `EditorView.onSelectAsset`'s doc comment.
     var onSelectAsset: (PhotoAsset) -> Void
+    /// The "Stack" section's "eye" button, for a stacked JPG — swaps the main preview to a plain,
+    /// unedited decode of that JPG file (no RAW-decode or `Stage` edits applied at all, since the
+    /// JPG shares the open RAW's `singleStage`/`customStages` once stacked) without navigating away
+    /// from the RAW's own open edit session the way `onSelectAsset` would. See
+    /// `EditorView.jpgPreviewAsset`'s doc comment for the render side of this.
+    var onPreviewJPG: (PhotoAsset) -> Void
     /// Enters the assisted-mask editor (`EditorView.maskEditingStage`) for the given stage — called
     /// both right after creating a new `.assistedMask` stage and from an existing one's "Refine
     /// Mask…" context menu item.
@@ -195,31 +201,7 @@ struct StagesSidebarView: View {
                 EditHistoryListView(history: history)
                     .listRowSeparator(.hidden)
             }
-            if !stackedPhotos.isEmpty {
-                Section("Stack") {
-                    ForEach(stackedPhotos) { photo in
-                        let isCurrent = photo.id == asset.id
-                        HStack(spacing: 8) {
-                            CompactPhotoThumbnail(asset: photo, isCurrent: isCurrent, size: 36)
-                            Text(photo.fileName)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .foregroundStyle(.primary)
-                            if isCurrent {
-                                Spacer()
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(uiColors.accentColor)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture { if !isCurrent { onSelectAsset(photo) } }
-                        .listRowBackground(isCurrent ? uiColors.accentColor.opacity(0.2) : Color.clear)
-                    }
-                }
-            }
-            Section("Presets") {
-                PresetBrowserView(onApply: applyPreset)
-            }
+            stackPresetsAndRecentSections
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
@@ -268,6 +250,56 @@ struct StagesSidebarView: View {
             Button("Create") { createBranch() }
         } message: {
             Text("Checks out \u{201C}\(branchingFromVersion?.name ?? "")\u{201D} — the next version you save will start this new branch.")
+        }
+    }
+
+    /// Pulled out of `body`'s `List` into its own computed property purely to keep the type-checker
+    /// fast — same reasoning as `ContentView.detailContent`'s own doc comment: the `List`'s
+    /// `ViewBuilder` closure got long enough (once "Copy from Recent" joined "Stack"/"Presets") to
+    /// blow past the checker's time limit (`error: the compiler is unable to type-check this
+    /// expression in reasonable time`) with no behavior change either side of the split.
+    @ViewBuilder private var stackPresetsAndRecentSections: some View {
+        if !stackedPhotos.isEmpty {
+            Section("Stack") {
+                ForEach(stackedPhotos) { photo in
+                    let isCurrent = photo.id == asset.id
+                    HStack(spacing: 8) {
+                        CompactPhotoThumbnail(asset: photo, isCurrent: isCurrent, size: 36)
+                        Text(photo.fileName)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        // Only on the JPG member(s), and never the currently-open photo itself —
+                        // a lightweight, non-navigating comparison (see `onPreviewJPG`'s doc
+                        // comment), not another way to switch which photo the editor has open the
+                        // way tapping the row itself (`onSelectAsset`) does.
+                        if !isCurrent, ["jpg", "jpeg"].contains(photo.fileExtension.lowercased()) {
+                            Button {
+                                onPreviewJPG(photo)
+                            } label: {
+                                Image(systemName: "eye")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Show what \(photo.fileName) looks like straight out of camera, no edits applied")
+                        }
+                        if isCurrent {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(uiColors.accentColor)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { if !isCurrent { onSelectAsset(photo) } }
+                    .listRowBackground(isCurrent ? uiColors.accentColor.opacity(0.2) : Color.clear)
+                }
+            }
+        }
+        Section("Presets") {
+            PresetBrowserView(onApply: applyPreset)
+        }
+        Section("Copy from Recent") {
+            RecentEditsBrowserView(currentAssetID: asset.id, onApply: applyRecentEdits)
         }
     }
 
@@ -562,6 +594,27 @@ struct StagesSidebarView: View {
             stage = Stage(kind: .custom, name: preset.name, stack: stack, sortIndex: nextIndex)
         } else {
             stage = Stage(kind: .custom, name: preset.name, asset: asset, sortIndex: nextIndex)
+        }
+        snapshot.apply(to: stage)
+        modelContext.insert(stage)
+        selectedStage = stage
+        refreshAndRender()
+    }
+
+    /// `RecentEditsBrowserView`'s row action — same "always append a new custom stage" shape as
+    /// `applyPreset(_:)`, just sourced from another live photo's *current* active stack (flattened
+    /// via `StageFieldSnapshot(mergingActiveStages:)`, same as "Save All Stages as Preset…") instead
+    /// of a saved `Preset`. No mask data crosses over — see `RecentEditsBrowserView`'s doc comment
+    /// for why a source photo's spatial mask can't meaningfully apply to a different photo.
+    private func applyRecentEdits(from sourceAsset: PhotoAsset) {
+        let snapshot = StageFieldSnapshot(mergingActiveStages: activeStageStack(for: sourceAsset))
+        let nextIndex = (asset.customStages.map(\.sortIndex).max() ?? -1) + 1
+        let name = "Copied from \(sourceAsset.fileName)"
+        let stage: Stage
+        if let stack = asset.stack {
+            stage = Stage(kind: .custom, name: name, stack: stack, sortIndex: nextIndex)
+        } else {
+            stage = Stage(kind: .custom, name: name, asset: asset, sortIndex: nextIndex)
         }
         snapshot.apply(to: stage)
         modelContext.insert(stage)

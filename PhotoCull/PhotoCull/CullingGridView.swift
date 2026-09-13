@@ -119,26 +119,48 @@ struct CullingGridView: View {
         }
     }
 
-    /// Builds the per-edge merge state a contiguous block of same-scene cells needs to read as
-    /// one wrapping outline rather than N individual rings — see `SceneBorderInfo`'s doc comment
-    /// for how `PhotoThumbnailCell` turns this into an actual seamless shape. An edge is "merged"
-    /// (no stroke, extends into the gutter instead) only when the neighbor in that direction is a
-    /// *different* display item in the same scene; the grid's own boundary (first/last column,
-    /// first/last item) always counts as a boundary edge. The scene's name is attached only to the
-    /// group's top-right corner cell (`!topMerged && !trailingMerged`) so it's shown once per
-    /// group, "inside the border" near its top-right — not once per photo.
+    /// `true` when the cell one step `rowOffset`/`colOffset` away from `index` (by grid position,
+    /// not flat-array position — needed so a diagonal check near the grid's own edge correctly
+    /// comes back `false` instead of wrapping to the next/previous row) belongs to the same scene.
+    private func sameSceneNeighbor(
+        _ index: Int, rowOffset: Int, colOffset: Int, scene: PhotoScene, in items: [DisplayItem]
+    ) -> Bool {
+        let col = index % max(columnCount, 1) + colOffset
+        let row = index / max(columnCount, 1) + rowOffset
+        guard col >= 0, col < columnCount, row >= 0 else { return false }
+        return currentScene(at: row * columnCount + col, in: items)?.id == scene.id
+    }
+
+    /// Every cell belonging to a scene gets `PhotoThumbnailCell`'s colored mat behind its photo,
+    /// extended into the gutter on any edge with a same-scene neighbor (`topMerged`/etc.) so
+    /// adjacent cells' mats meet with no gap — together with each corner's `SceneBorderInfo
+    /// .CornerKind` (see its own doc comment for the convex/concave/square logic), that's what
+    /// makes an irregular block of same-scene cells read as one continuous, smoothly-jointed shape
+    /// rather than a grid of separate square swatches. The scene's name is attached only once per
+    /// group, to whichever cell is both the topmost row and the rightmost cell in that row — exactly
+    /// the cell whose top-trailing corner is a true outer (`.convex`) corner.
     private func sceneBorderInfo(at index: Int, in items: [DisplayItem]) -> SceneBorderInfo? {
         guard let scene = currentScene(at: index, in: items) else { return nil }
-        let col = index % max(columnCount, 1)
-        let leadingMerged = col > 0 && currentScene(at: index - 1, in: items)?.id == scene.id
-        let trailingMerged = col < columnCount - 1 && index + 1 < items.count && currentScene(at: index + 1, in: items)?.id == scene.id
-        let topMerged = index - columnCount >= 0 && currentScene(at: index - columnCount, in: items)?.id == scene.id
-        let bottomMerged = index + columnCount < items.count && currentScene(at: index + columnCount, in: items)?.id == scene.id
+        func neighbor(_ rowOffset: Int, _ colOffset: Int) -> Bool {
+            sameSceneNeighbor(index, rowOffset: rowOffset, colOffset: colOffset, scene: scene, in: items)
+        }
+        let up = neighbor(-1, 0), down = neighbor(1, 0), leading = neighbor(0, -1), trailing = neighbor(0, 1)
+        let upLeading = neighbor(-1, -1), upTrailing = neighbor(-1, 1)
+        let downLeading = neighbor(1, -1), downTrailing = neighbor(1, 1)
+        func corner(_ a: Bool, _ b: Bool, _ diagonal: Bool) -> SceneBorderInfo.CornerKind {
+            if !a && !b { return .convex }
+            if a && b && !diagonal { return .concave }
+            return .square
+        }
+        let topTrailingKind = corner(up, trailing, upTrailing)
         return SceneBorderInfo(
             color: sceneBorderColor(for: scene),
-            name: (!topMerged && !trailingMerged) ? scene.name : nil,
-            topMerged: topMerged, bottomMerged: bottomMerged,
-            leadingMerged: leadingMerged, trailingMerged: trailingMerged
+            name: topTrailingKind == .convex ? scene.name : nil,
+            topLeading: corner(up, leading, upLeading),
+            topTrailing: topTrailingKind,
+            bottomLeading: corner(down, leading, downLeading),
+            bottomTrailing: corner(down, trailing, downTrailing),
+            topMerged: up, bottomMerged: down, leadingMerged: leading, trailingMerged: trailing
         )
     }
 

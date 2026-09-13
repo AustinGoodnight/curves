@@ -160,6 +160,20 @@ public final class Stage {
     public var editFilmicSaturation: Double?
     public var editFilmicBalance: Double?
 
+    /// Same auto-managed convention as `editFilmicEnabled` above, and mutually exclusive with it —
+    /// Filmic and AgX are alternative tone mappers for the same pipeline slot (see
+    /// `RawImageRenderer.applyStage(_:to:)`); the app target's tone-mapper picker in
+    /// `EditorSidebarView` is what keeps only one of the two `true` at a time.
+    public var editAgXEnabled: Bool = false
+    public var editAgXWhitePointSource: Double?
+    public var editAgXBlackPointSource: Double?
+    public var editAgXContrast: Double?
+    public var editAgXSlope: Double?
+    public var editAgXLift: Double?
+    public var editAgXBrightness: Double?
+    public var editAgXSaturation: Double?
+    public var editAgXHueMix: Double?
+
     /// `false` by default/when empty, same auto-managed convention as `editFilmicEnabled` above —
     /// see `syncModuleEnabled` in the app target's `EditorParameters.swift`.
     public var editColorBalanceEnabled: Bool = false

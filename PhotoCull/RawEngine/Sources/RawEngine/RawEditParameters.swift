@@ -73,9 +73,14 @@ public struct StageParameters: Equatable, Sendable {
     /// removal is a basic-panel correction, not a grade (see `DehazeParameters`).
     public var dehaze: DehazeParameters?
     /// `nil` means "no filmic tone curve" — the Phase 2 passthrough behavior. Set to enable the
-    /// filmic RGB module (see `FilmicRGBParameters`).
+    /// filmic RGB module (see `FilmicRGBParameters`). Mutually exclusive with `agx` — both are
+    /// alternative tone mappers for the same pipeline slot; see `RawImageRenderer.applyStage(_:to:)`.
     public var filmicRGB: FilmicRGBParameters?
-    /// `nil` means "no color balance wheels". Applied after `filmicRGB` — darktable's default
+    /// `nil` means "no AgX tone mapping". Mutually exclusive with `filmicRGB` — when both are set,
+    /// `filmicRGB` wins (see `RawImageRenderer.applyStage(_:to:)`); the app target's UI is
+    /// responsible for keeping only one of the two enabled at a time (see `AgXParameters`).
+    public var agx: AgXParameters?
+    /// `nil` means "no color balance wheels". Applied after `filmicRGB`/`agx` — darktable's default
     /// scene-referred pipeline grades color on the already-tonemapped result (see
     /// `ColorBalanceRGBParameters`).
     public var colorBalanceRGB: ColorBalanceRGBParameters?
@@ -99,6 +104,7 @@ public struct StageParameters: Equatable, Sendable {
     public init(
         dehaze: DehazeParameters? = nil,
         filmicRGB: FilmicRGBParameters? = nil,
+        agx: AgXParameters? = nil,
         colorBalanceRGB: ColorBalanceRGBParameters? = nil,
         colorZones: ColorZonesParameters? = nil,
         rgbCurve: RGBCurveParameters? = nil,
@@ -107,6 +113,7 @@ public struct StageParameters: Equatable, Sendable {
     ) {
         self.dehaze = dehaze
         self.filmicRGB = filmicRGB
+        self.agx = agx
         self.colorBalanceRGB = colorBalanceRGB
         self.colorZones = colorZones
         self.rgbCurve = rgbCurve
@@ -117,7 +124,7 @@ public struct StageParameters: Equatable, Sendable {
     /// True when this stage contributes no kernel passes at all — the render loop can skip it
     /// entirely rather than running through the no-op checks.
     public var isEmpty: Bool {
-        dehaze == nil && filmicRGB == nil && colorBalanceRGB == nil && colorZones == nil && rgbCurve == nil && lut3D == nil
+        dehaze == nil && filmicRGB == nil && agx == nil && colorBalanceRGB == nil && colorZones == nil && rgbCurve == nil && lut3D == nil
     }
 
     public static let none = StageParameters()

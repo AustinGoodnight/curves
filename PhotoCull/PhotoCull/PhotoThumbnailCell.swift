@@ -20,56 +20,125 @@ func sceneBorderColor(for scene: PhotoScene) -> Color {
     return palette[sum % palette.count]
 }
 
-/// Which of a cell's 4 edges border a *different* scene (or the grid boundary) versus a same-
-/// scene neighbor. `CullingGridView` computes this per cell from its grid position, since only it
-/// knows the neighbors — `PhotoThumbnailCell` just draws whatever it's told. A `merged` edge gets
-/// no stroke there and the shape extends halfway into the gutter instead, so two adjacent same-
-/// scene cells' borders meet in the middle of the gap with no visible seam; a boundary edge gets
-/// a stroke and a smaller outward extension, matching the selection ring's own inset. See
-/// `SceneBorderShape`/`PhotoThumbnailCell.sceneBorderOverlay` for how the two extension amounts
-/// are what actually produces one continuous outline around an irregular block of cells, not
-/// separate rings per photo.
+/// A scene's photo gets a colored mat behind it (see `PhotoThumbnailCell.body`/`SceneMatShape`)
+/// plus, on one cell per group, a name label on top. `CullingGridView` computes this per cell —
+/// only it knows a cell's scene and its neighbors — `PhotoThumbnailCell` just draws whatever it's
+/// told.
 struct SceneBorderInfo {
+    /// How `SceneMatShape` should draw one corner of a cell's mat, decided from that corner's two
+    /// adjacent edges and its diagonal neighbor (all same-scene checks, computed in
+    /// `CullingGridView.sceneBorderInfo`):
+    /// - `.convex`: neither adjacent edge continues into a same-scene neighbor — a true outer
+    ///   corner of the group, rounded outward like an ordinary rounded rect corner.
+    /// - `.concave`: *both* adjacent edges continue, but the diagonal neighbor is a *different*
+    ///   scene (or none) — an inner corner where an irregular block bends, rounded *inward* instead
+    ///   (a "liquid" notch) so the joint between the two arms reads as one smoothly-flowing shape
+    ///   rather than a sharp reflex angle.
+    /// - `.square`: everything else — either exactly one adjacent edge continues (a corner sitting
+    ///   midway along an otherwise-straight run), or both do and the diagonal neighbor also matches
+    ///   (a corner fully interior to a solid block, needing no visual treatment at all).
+    enum CornerKind {
+        case convex
+        case concave
+        case square
+    }
+
     var color: Color
     /// Non-nil only on the group's top-right corner cell (see `CullingGridView.sceneBorderInfo`)
     /// — shown once per group, not once per photo.
     var name: String?
+    var topLeading: CornerKind
+    var topTrailing: CornerKind
+    var bottomLeading: CornerKind
+    var bottomTrailing: CornerKind
+    /// Whether each edge borders a same-scene neighbor — `PhotoThumbnailCell` extends the mat by
+    /// half `CullingGridView`'s inter-cell spacing into the gutter on any `true` edge (matching the
+    /// old wrapping-outline's own gutter-extension trick) so two adjacent cells' mats meet exactly
+    /// in the middle with no visible gap.
     var topMerged: Bool
     var bottomMerged: Bool
     var leadingMerged: Bool
     var trailingMerged: Bool
 }
 
-/// Draws only the requested edges of a rect — the building block `sceneBorderOverlay` uses to
-/// turn per-cell edge decisions into what reads as one wrapping outline. Straight corners rather
-/// than `RoundedRectangle`'s rounded ones: a rounded corner only makes sense at the true outer
-/// corners of a group, and telling those apart from an inner seam (where two boundary edges of
-/// *different*, non-adjacent group corners happen to meet) isn't worth the complexity here.
-private struct SceneBorderShape: Shape {
-    var top: Bool
-    var bottom: Bool
-    var leading: Bool
-    var trailing: Bool
+/// The filled shape `PhotoThumbnailCell`'s scene mat is drawn with — a `RoundedRectangle` with each
+/// of its 4 corners independently convex, concave, or square (see `SceneBorderInfo.CornerKind`).
+/// Traces the rect clockwise (top edge → top-trailing corner → trailing edge → …), building each
+/// corner from its own two tangent points (`r` in from the true corner along each adjacent edge)
+/// plus, for `.concave`, the true corner point itself: a convex corner arcs around a center inset
+/// by `r` from both edges (the usual rounded-rect construction); a concave corner arcs around a
+/// center placed *at the true corner* instead, tracing the same two tangent points but curving the
+/// other way, which is what carves the inward notch.
+private struct SceneMatShape: Shape {
+    var topLeading: SceneBorderInfo.CornerKind
+    var topTrailing: SceneBorderInfo.CornerKind
+    var bottomLeading: SceneBorderInfo.CornerKind
+    var bottomTrailing: SceneBorderInfo.CornerKind
+    var radius: CGFloat
 
     func path(in rect: CGRect) -> Path {
+        let r = min(radius, min(rect.width, rect.height) / 2)
+        let minX = rect.minX, minY = rect.minY, maxX = rect.maxX, maxY = rect.maxY
+
+        let tlCorner = CGPoint(x: minX, y: minY)
+        let tlOnTop = CGPoint(x: minX + r, y: minY)
+        let tlOnLeading = CGPoint(x: minX, y: minY + r)
+
+        let trCorner = CGPoint(x: maxX, y: minY)
+        let trOnTop = CGPoint(x: maxX - r, y: minY)
+        let trOnTrailing = CGPoint(x: maxX, y: minY + r)
+
+        let brCorner = CGPoint(x: maxX, y: maxY)
+        let brOnTrailing = CGPoint(x: maxX, y: maxY - r)
+        let brOnBottom = CGPoint(x: maxX - r, y: maxY)
+
+        let blCorner = CGPoint(x: minX, y: maxY)
+        let blOnBottom = CGPoint(x: minX + r, y: maxY)
+        let blOnLeading = CGPoint(x: minX, y: maxY - r)
+
         var path = Path()
-        if top {
-            path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        }
-        if trailing {
-            path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        }
-        if bottom {
-            path.move(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        }
-        if leading {
-            path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
-        }
+        path.move(to: topLeading == .square ? tlCorner : tlOnTop)
+
+        path.addLine(to: topTrailing == .square ? trCorner : trOnTop)
+        addCorner(&path, topTrailing, corner: trCorner, from: trOnTop, to: trOnTrailing, insetCenter: CGPoint(x: maxX - r, y: minY + r))
+
+        path.addLine(to: bottomTrailing == .square ? brCorner : brOnTrailing)
+        addCorner(&path, bottomTrailing, corner: brCorner, from: brOnTrailing, to: brOnBottom, insetCenter: CGPoint(x: maxX - r, y: maxY - r))
+
+        path.addLine(to: bottomLeading == .square ? blCorner : blOnBottom)
+        addCorner(&path, bottomLeading, corner: blCorner, from: blOnBottom, to: blOnLeading, insetCenter: CGPoint(x: minX + r, y: maxY - r))
+
+        path.addLine(to: topLeading == .square ? tlCorner : tlOnLeading)
+        addCorner(&path, topLeading, corner: tlCorner, from: tlOnLeading, to: tlOnTop, insetCenter: CGPoint(x: minX + r, y: minY + r))
+
+        path.closeSubpath()
         return path
+    }
+
+    private func addCorner(
+        _ path: inout Path, _ kind: SceneBorderInfo.CornerKind, corner: CGPoint, from: CGPoint, to: CGPoint,
+        insetCenter: CGPoint
+    ) {
+        switch kind {
+        case .square:
+            break
+        case .convex:
+            path.addArc(
+                center: insetCenter, radius: radius,
+                startAngle: angle(from: insetCenter, to: from), endAngle: angle(from: insetCenter, to: to),
+                clockwise: false
+            )
+        case .concave:
+            path.addArc(
+                center: corner, radius: radius,
+                startAngle: angle(from: corner, to: from), endAngle: angle(from: corner, to: to),
+                clockwise: true
+            )
+        }
+    }
+
+    private func angle(from center: CGPoint, to point: CGPoint) -> Angle {
+        .radians(Double(atan2(point.y - center.y, point.x - center.x)))
     }
 }
 
@@ -88,23 +157,50 @@ struct PhotoThumbnailCell: View {
     var body: some View {
         VStack(spacing: 6) {
             ZStack {
-                RoundedRectangle(cornerRadius: 6).fill(.gray.opacity(0.15))
-                if let thumbnail {
-                    Image(decorative: thumbnail, scale: 1)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
+                // The scene's color as a mat *behind* the photo — not a stroke on top of it or a
+                // badge floating over a corner. The photo (below) insets a few pt from this shape's
+                // own edges, so the color shows as a uniform margin all the way around it, like a
+                // mat behind a framed print. Extended into the gutter on any merged edge (see
+                // `SceneBorderInfo.topMerged`'s doc comment) so a same-scene neighbor's own mat
+                // meets this one with no gap — `SceneMatShape`'s per-corner convex/concave/square
+                // treatment is what then makes that joined shape read as one smooth, "liquid" region
+                // instead of a grid of separate square swatches. Dimmed via opacity, not a manually-
+                // desaturated color — the palette in `sceneBorderColor(for:)` is picked at full
+                // saturation so it still reads clearly at the name label's small pill size (see
+                // below), which stays at full opacity.
+                if let sceneBorder {
+                    SceneMatShape(
+                        topLeading: sceneBorder.topLeading, topTrailing: sceneBorder.topTrailing,
+                        bottomLeading: sceneBorder.bottomLeading, bottomTrailing: sceneBorder.bottomTrailing,
+                        radius: 8
+                    )
+                    .fill(sceneBorder.color.opacity(0.45))
+                    .padding(EdgeInsets(
+                        top: sceneBorder.topMerged ? -6 : 0,
+                        leading: sceneBorder.leadingMerged ? -6 : 0,
+                        bottom: sceneBorder.bottomMerged ? -6 : 0,
+                        trailing: sceneBorder.trailingMerged ? -6 : 0
+                    ))
                 }
-                if asset.flag == .reject {
-                    Color.black.opacity(0.35)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6).fill(.gray.opacity(0.15))
+                    if let thumbnail {
+                        Image(decorative: thumbnail, scale: 1)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                    } else {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    if asset.flag == .reject {
+                        Color.black.opacity(0.35)
+                    }
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(sceneBorder == nil ? 0 : 5)
             }
             .frame(height: 140)
             .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay { sceneBorderOverlay }
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(isSelected ? uiColors.accentColor : .clear, lineWidth: 3)
@@ -112,7 +208,7 @@ struct PhotoThumbnailCell: View {
             .overlay(alignment: .topTrailing) { flagBadge }
             .overlay(alignment: .topLeading) { colorDot }
             .overlay(alignment: .bottomLeading) { stackBadgeView }
-            .overlay(alignment: .topTrailing) { sceneNameLabel }
+            .overlay(alignment: .topLeading) { sceneNameLabel }
             .overlay(alignment: .topTrailing) { editButton }
             .onHover { isHovering = $0 }
 
@@ -209,55 +305,31 @@ struct PhotoThumbnailCell: View {
         }
     }
 
-    /// Boundary edges (facing a different scene, no scene, or the grid edge) get a small 4pt
-    /// outward extension — enough to clear the selection ring drawn just inside the frame. Merged
-    /// edges (facing a same-scene neighbor) get pulled instead of stroked, and the shape extends
-    /// 6pt outward there — half of `CullingGridView`'s 12pt inter-cell spacing — so this cell's
-    /// extension meets the neighbor's own 6pt extension exactly in the middle of the gutter
-    /// between them, with no gap. A boundary edge that's actually drawn (top/bottom/leading/
-    /// trailing when not merged) spans the shape's *full*, already-extended rect — that's what
-    /// lets e.g. a top edge continue unbroken across a merged left/right seam instead of stopping
-    /// at this cell's own original width.
-    @ViewBuilder private var sceneBorderOverlay: some View {
-        if let sceneBorder {
-            SceneBorderShape(
-                top: !sceneBorder.topMerged, bottom: !sceneBorder.bottomMerged,
-                leading: !sceneBorder.leadingMerged, trailing: !sceneBorder.trailingMerged
-            )
-            .stroke(sceneBorder.color, lineWidth: 3)
-            .padding(EdgeInsets(
-                top: sceneBorder.topMerged ? -6 : -4,
-                leading: sceneBorder.leadingMerged ? -6 : -4,
-                bottom: sceneBorder.bottomMerged ? -6 : -4,
-                trailing: sceneBorder.trailingMerged ? -6 : -4
-            ))
-        }
-    }
-
-    /// The scene's name, shown once per group (see `SceneBorderInfo.name`) just inside the
-    /// border's top-right corner. Offset below `flagBadge`'s own top-trailing spot (a filled
-    /// circle roughly 24pt tall including its padding) rather than sharing the exact corner, so
-    /// the rare case of a rejected/picked photo also being a group's label-holder doesn't overlap
-    /// the two.
+    /// The scene's name, shown once per group (see `SceneBorderInfo.name`) — a filled pill in the
+    /// scene's own color, sitting *on top* of the photo (unlike the dimmed mat behind it, so the
+    /// pill itself stays at full opacity/legible regardless of what's under it). Top-leading, not
+    /// top-trailing — that corner's shared with `editButton`/`flagBadge` instead. Offset below
+    /// `colorDot`'s own top-leading spot (a filled circle roughly 22pt tall including its padding)
+    /// rather than sharing the exact corner, so the rare case of a color-labeled photo also being a
+    /// group's label-holder doesn't overlap the two.
     @ViewBuilder private var sceneNameLabel: some View {
         if let name = sceneBorder?.name {
             Text(name)
                 .font(.caption2.weight(.semibold))
                 .lineLimit(1)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.thinMaterial, in: Capsule())
-                .foregroundStyle(sceneBorder?.color ?? .primary)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(sceneBorder?.color ?? .clear, in: Capsule())
                 .padding(.top, 26)
-                .padding(.trailing, 6)
+                .padding(.leading, 6)
         }
     }
 
     /// Opening a photo is this hover-revealed button, never the cell's own click — see
     /// `CullingGridView.cell(for:at:)`'s doc comment for why a click only ever selects now.
     /// Pinned to the top-right corner alongside `flagBadge` (also top-trailing) — offset further
-    /// right when a flag badge is actually showing so the two don't overlap; `sceneNameLabel`
-    /// lives in the same corner too but is pushed down 26pt, well clear of this row.
+    /// right when a flag badge is actually showing so the two don't overlap.
     @ViewBuilder private var editButton: some View {
         if isHovering, let onOpenEditor {
             Button(action: onOpenEditor) {

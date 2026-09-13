@@ -292,7 +292,11 @@ struct ColorWheelControl: View {
             .onEnded { _ in previousPuckLocation = nil }
     }
 
+    /// Same `Color.controlSpectrumSaturation`/`.controlSpectrumBrightness` every other spectrum
+    /// control in the bottom bar renders at (Color Zones' hue axis, the WB/Chr/Vib/Sat faders, the
+    /// XY pad) — was a fully-saturated `saturation: 1, brightness: 1` on its own, which read
+    /// noticeably more neon than its siblings.
     private static let hueSpectrum = Gradient(colors: stride(from: 0.0, through: 360.0, by: 30.0).map {
-        Color(hue: $0 / 360.0, saturation: 1, brightness: 1)
+        Color(hue: $0 / 360.0, saturation: Color.controlSpectrumSaturation, brightness: Color.controlSpectrumBrightness)
     })
 }

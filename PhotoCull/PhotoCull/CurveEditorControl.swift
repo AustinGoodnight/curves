@@ -166,10 +166,13 @@ struct CurveEditorControl: View {
             : AnyShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    /// Full-saturation spectrum, both ends red — hue wraps at 0°/360°, so a `LinearGradient` with
-    /// matching colors at x = 0 and x = 1 reads correctly against the graph's own [0, 1] domain.
+    /// Full-hue spectrum, both ends red — hue wraps at 0°/360°, so a `LinearGradient` with matching
+    /// colors at x = 0 and x = 1 reads correctly against the graph's own [0, 1] domain.
+    /// `Color.controlSpectrumSaturation`/`.controlSpectrumBrightness` — same vividness every other
+    /// spectrum control in the bottom bar renders at (the color wheels' arcs, WB/Chr/Vib/Sat, the
+    /// XY pad); this was the level the others were normalized to match, not the other way around.
     private static let hueSpectrum: [Color] = stride(from: 0.0, through: 1.0, by: 1.0 / 12.0)
-        .map { Color(hue: $0, saturation: 0.85, brightness: 0.95) }
+        .map { Color(hue: $0, saturation: Color.controlSpectrumSaturation, brightness: Color.controlSpectrumBrightness) }
 
     /// Color Zones gets the spectrum; RGB Curve gets `uiColors.recessedTrackBackground` — the same
     /// fixed opaque fill `MinimalSlider`/`VerticalCircleSlider` use for their own track background

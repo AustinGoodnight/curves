@@ -6,7 +6,7 @@ import PhotoCatalog
 /// The culling grid's bottom export bar — pick a preset, then export either the current selection
 /// or everything currently visible in the grid (`store.filteredAssets`, i.e. respecting whatever
 /// scene/session/rating/flag filter is active). A genuine separate `View` type (not inline in
-/// `GridPane.body`), same isolation reasoning as `RatingFilterControl`/`EditButton` in
+/// `GridPane.body`), same isolation reasoning as `RatingFilterControl` in
 /// `DetailPaneView.swift`: this is the one piece of the grid pane that reads `store.selection`/
 /// `store.filteredAssets` as *values* for its own button labels/enabled state, so only this small
 /// view's `body` re-runs when those change, not the whole `GridPane`.

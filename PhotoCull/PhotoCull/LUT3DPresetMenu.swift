@@ -10,7 +10,7 @@ import PhotoCatalog
 /// this list.
 ///
 /// A genuine separate `View` type (not inline in `ColorBalanceBarView`), same reasoning as
-/// `OrganizeMenu` in `DetailPaneView.swift`: this is the only piece of the bottom bar with its own
+/// `StackSceneControl` in `DetailPaneView.swift`: this is the only piece of the bottom bar with its own
 /// `@Query`, and SwiftData's broad change-tracking means editing *any* `LUT3DPreset` anywhere
 /// (importing, renaming, deleting) is enough to re-invoke a `body` that reads the query — scoping
 /// that to this small list keeps it from also re-diffing the color wheels and Color Zones graph.

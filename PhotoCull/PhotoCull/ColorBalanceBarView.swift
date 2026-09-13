@@ -68,6 +68,20 @@ struct ColorBalanceBarView: View {
     private let colorZonesToolbarHeight: CGFloat = 24
 
     var body: some View {
+        // Wrapped in a horizontal `ScrollView` — every section below (`colorBalanceSection`,
+        // `detailSection`, `lensCorrectionSection`) carries its own `.fixedSize(horizontal: true)`
+        // (see each one's doc comment for why: without it, an idle `Spacer` would let it greedily
+        // expand and shove its neighbor sideways when the window has extra width). The flip side of
+        // "never compress below ideal" is "never compress at all" — with this `HStack` sitting
+        // directly in `EditorView`'s outer `VStack` (full window width, not constrained by the
+        // `HSplitView` above it), that made this bar's full natural width — 4 wheels, Color Zones'
+        // graph, every fader — an unconditional floor under the *entire window's* minimum width,
+        // regardless of anything else on screen. A `ScrollView` reports a small, flexible width to
+        // its parent and lets the bar's true content overflow into horizontal scrolling instead —
+        // the individual sections keep their tuned "don't compress, don't be shoved" behavior
+        // unchanged, it's just no longer the window's own problem when there isn't room for all of
+        // them at once.
+        //
         // `.fixedSize(vertical:)` pins this to its own ideal content height regardless of what
         // the parent `VStack` proposes — without it, this `HStack` was greedily claiming leftover
         // window height instead of leaving it to `EditorView`'s `HSplitView`, leaving a dead
@@ -80,18 +94,19 @@ struct ColorBalanceBarView: View {
         // `.contentTop` is a custom alignment (see below) each section tags onto its *actual*
         // content — the fader/wheel row, the graph — so the two line up regardless of how tall
         // either section's own header chrome happens to be.
-        HStack(alignment: .contentTop, spacing: 32) {
-            colorBalanceSection
-            colorZonesSection
-            detailSection
-            lensCorrectionSection
-            lut3DSection
-            Spacer(minLength: 0)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .contentTop, spacing: 32) {
+                colorBalanceSection
+                colorZonesSection
+                detailSection
+                lensCorrectionSection
+                lut3DSection
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+            .padding(.top, 8)
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 24)
-        .padding(.bottom, 24)
-        .padding(.top, 8)
         .toggleStyle(.switch)
         .disabled(!coordinator.isReady)
         .background(uiColors.sidebarBackground)
@@ -148,6 +163,10 @@ struct ColorBalanceBarView: View {
                         tintText: formattedTint(asset.editNeutralTint ?? coordinator.renderer.defaultNeutralTint)
                     )
                 }
+            }
+            .contextMenu {
+                Button("Copy WB to Every Photo in Scene") { copyWhiteBalanceToScene() }
+                    .disabled(asset.scene == nil)
             }
 
             titledGroup("Color Wheels", enabled: stageBoolBind(\.editColorWheelsEnabled)) {
@@ -444,6 +463,23 @@ struct ColorBalanceBarView: View {
 
     private var whiteBalanceGate: ModuleGate {
         ModuleGate(hasAdjustments: { whiteBalanceHasAdjustments(asset) }, setEnabled: { asset.editWhiteBalanceEnabled = $0 })
+    }
+
+    /// Temp/Tint are asset-level, not per-`Stage` (see `Stage`'s doc comment on why they can't
+    /// stack), so there's no shared "scene" copy of them the way Filmic/Color Balance/Color Zones
+    /// get for free by living on `PhotoScene.stage`. This is a one-time copy — like
+    /// `StagesSidebarView`'s "Save as Default Stage" — onto every other photo's own WB fields, not a
+    /// live-linked source of truth: a later WB tweak on any one photo doesn't re-propagate until
+    /// this is invoked again. Only the currently-open `asset` gets a fresh render scheduled — the
+    /// others aren't being previewed right now, and the grid's own thumbnails are decoded straight
+    /// from each file rather than reflecting slider edits, so there's nothing else to invalidate.
+    private func copyWhiteBalanceToScene() {
+        guard let photos = asset.scene?.photos else { return }
+        for photo in photos where photo.id != asset.id {
+            photo.editNeutralTemperature = asset.editNeutralTemperature
+            photo.editNeutralTint = asset.editNeutralTint
+            photo.editWhiteBalanceEnabled = asset.editWhiteBalanceEnabled
+        }
     }
 
     private var colorWheelsGate: ModuleGate {

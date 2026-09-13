@@ -3,6 +3,7 @@ import AppKit
 import SwiftData
 import PhotoCatalog
 import RawEngine
+import CoreImage
 
 /// Assembles the image pane, `EditorSidebarView`, and `ColorBalanceBarView` — deliberately thin.
 /// Those two are genuine separate `View` types (not computed properties) specifically so that
@@ -10,10 +11,12 @@ import RawEngine
 /// `EditorRenderCoordinator`'s doc comment for the full story on why that split exists.
 struct EditorView: View {
     let asset: PhotoAsset
-    /// Threaded down to `SessionFilmstripView` and `StagesSidebarView`'s "Stack" section — both let
-    /// you jump to a different photo without leaving the editor. `ContentView` passes its own
-    /// `openEditor(for:)` here, the same function the grid uses, so switching photos from either
-    /// filmstrip behaves identically to opening one from the grid.
+    /// Threaded down to `StagesSidebarView`'s "Stack" section, which also lets you jump to a
+    /// different photo without leaving the editor (`SessionFilmstripView`, `ContentView`'s other
+    /// consumer of this same closure, is constructed as this view's sibling rather than its child —
+    /// see that view's doc comment). `ContentView` passes its own `openEditor(for:)` here, the same
+    /// function the grid uses, so switching photos from either filmstrip behaves identically to
+    /// opening one from the grid.
     var onSelectAsset: (PhotoAsset) -> Void
 
     @State private var coordinator = EditorRenderCoordinator()
@@ -69,6 +72,21 @@ struct EditorView: View {
     /// viewing aid (checking how the image reads against different surrounds), not part of the
     /// edit itself, so this is plain local `@State`, not persisted or threaded into `scheduleRender`.
     @State private var previewBackgroundColor: Color = .editorPreviewBackground
+    /// Set from `StagesSidebarView`'s "Stack" section "eye" button — swaps the main preview to a
+    /// plain, unedited decode of *this* stacked JPG (see `jpgPreviewImage`) instead of `asset`'s own
+    /// `coordinator.previewImage`, without navigating the editor away from `asset`'s own open edit
+    /// session the way `onSelectAsset` would. `nil` is the normal state (showing `asset`'s own
+    /// preview); set back to `nil` by the comparison view's own "Back to RAW" button.
+    @State private var jpgPreviewAsset: PhotoAsset?
+    /// The plain decode `jpgPreviewAsset` produces — `nil` while decoding (or if `jpgPreviewAsset`
+    /// itself is `nil`). Deliberately *not* run through `coordinator`/`RawImageRenderer`'s normal
+    /// `renderPreview`: that always composites `stageStack` over whatever it decodes, and a stacked
+    /// JPG shares the open RAW's `singleStage`/`customStages` (see `PhotoStack.stages`'s doc
+    /// comment in `PhotoCatalog`), so going through the normal pipeline would apply the RAW's own
+    /// Filmic/Color Balance/Curve/etc. edits on top of the JPG — the opposite of "no edits applied".
+    /// A direct `CIImage(contentsOf:)` decode, mirroring `RawImageRenderer.load(url:)`'s own
+    /// standard-image fallback, is what actually guarantees that.
+    @State private var jpgPreviewImage: CGImage?
 
     init(asset: PhotoAsset, onSelectAsset: @escaping (PhotoAsset) -> Void) {
         self.asset = asset
@@ -85,12 +103,11 @@ struct EditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
-                SessionFilmstripView(asset: asset, onSelectAsset: onSelectAsset)
-
                 StagesSidebarView(
                     asset: asset, selectedStage: $selectedStage, activeStages: $activeStages, coordinator: coordinator,
                     history: history,
                     onSelectAsset: onSelectAsset,
+                    onPreviewJPG: { jpgPreviewAsset = $0 },
                     onEditMask: { maskEditingStage = $0 },
                     onEditGradientMask: { gradientEditingStage = $0 },
                     onEditColorRangeMask: { colorRangeEditingStage = $0 },
@@ -176,6 +193,32 @@ struct EditorView: View {
                                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                             }
                         )
+                    } else if let jpgPreviewAsset {
+                        ZStack {
+                            if let jpgPreviewImage {
+                                ZoomableImagePane(previewImage: jpgPreviewImage)
+                                    .id(jpgPreviewAsset.filePath)
+                            } else {
+                                ProgressView("Decoding JPG…")
+                                    .tint(.white)
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                        .overlay(alignment: .bottom) {
+                            HStack(spacing: 10) {
+                                Text("\(jpgPreviewAsset.fileName) — no edits applied")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                Button("Back to RAW") { self.jpgPreviewAsset = nil }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(.white)
+                                    .fontWeight(.semibold)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                            .padding(.bottom, 16)
+                        }
                     } else if let previewImage = coordinator.previewImage {
                         ZoomableImagePane(previewImage: previewImage)
                             .id(asset.filePath)
@@ -218,6 +261,23 @@ struct EditorView: View {
                 baseParams: rawBaseParameters(for: asset),
                 stageStack: activeStages.map { stageParameters(for: $0, detailEnabled: asset.editDetailEnabled) }
             )
+        }
+        // Keyed on the id, not `jpgPreviewAsset` itself — `PhotoAsset`'s own `Equatable` is
+        // identity-based (see `DetailStore`'s doc comment elsewhere in this app), so this would
+        // behave the same either way, but the id makes the "what actually changes this" intent
+        // explicit. A direct `CIImage(contentsOf:)` decode, not `coordinator`/`RawImageRenderer` —
+        // see `jpgPreviewImage`'s doc comment for why going through the normal render pipeline
+        // would apply the open RAW's own edits on top of the JPG instead of showing it plain.
+        .task(id: jpgPreviewAsset?.id) {
+            guard let jpgPreviewAsset else {
+                jpgPreviewImage = nil
+                return
+            }
+            let url = jpgPreviewAsset.resolvedURL()
+            jpgPreviewImage = await Task.detached(priority: .userInitiated) {
+                guard let ciImage = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else { return nil }
+                return CIContext().createCGImage(ciImage, from: ciImage.extent)
+            }.value
         }
     }
 

@@ -51,9 +51,35 @@ struct PhotoCullApp: App {
         do {
             return try ModelContainer(for: schema, configurations: [config])
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            // No SchemaMigrationPlan is wired up, so an in-development `@Model` change SwiftData
+            // can't auto-migrate throws here. Crashing used to be the only way to see this, and
+            // the only way *past* the crash was manually deleting the store — which is what was
+            // actually destroying edits on every schema change. Move the incompatible store aside
+            // (timestamped, never deleted) and start fresh instead, so a schema change costs a
+            // clean slate rather than a stuck app plus a forced wipe.
+            Self.backUpIncompatibleStore(at: config.url)
+            do {
+                return try ModelContainer(for: schema, configurations: [config])
+            } catch {
+                fatalError("Could not create ModelContainer even after backing up the incompatible store: \(error)")
+            }
         }
     }()
+
+    /// Renames the SQLite store (plus its `-shm`/`-wal` siblings) to a timestamped backup next to
+    /// itself rather than deleting it, so a failed migration is recoverable instead of silently
+    /// gone. Best-effort: if a rename fails, ModelContainer's retry below will fail too and
+    /// surface that loudly via `fatalError` rather than looping silently.
+    private static func backUpIncompatibleStore(at storeURL: URL) {
+        let fm = FileManager.default
+        let timestamp = ISO8601DateFormatter().string(from: .now).replacingOccurrences(of: ":", with: "-")
+        for suffix in ["", "-shm", "-wal"] {
+            let source = URL(fileURLWithPath: storeURL.path + suffix)
+            guard fm.fileExists(atPath: source.path) else { continue }
+            let backup = URL(fileURLWithPath: storeURL.path + ".incompatible-\(timestamp)" + suffix)
+            try? fm.moveItem(at: source, to: backup)
+        }
+    }
 
     var body: some Scene {
         WindowGroup {

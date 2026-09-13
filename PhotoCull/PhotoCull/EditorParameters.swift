@@ -101,6 +101,23 @@ func filmicParameters(for stage: Stage) -> FilmicRGBParameters? {
     )
 }
 
+/// Mirrors `filmicParameters(for:)` — Filmic and AgX are alternative tone mappers for the same
+/// pipeline slot (see `RawImageRenderer.applyStage(_:to:)`), each gated by its own `Stage` switch.
+func agxParameters(for stage: Stage) -> AgXParameters? {
+    guard stage.editAgXEnabled else { return nil }
+    let d = AgXParameters.darktableDefault
+    return AgXParameters(
+        lookLift: stage.editAgXLift ?? d.lookLift,
+        lookSlope: stage.editAgXSlope ?? d.lookSlope,
+        lookBrightness: stage.editAgXBrightness ?? d.lookBrightness,
+        lookSaturation: stage.editAgXSaturation ?? d.lookSaturation,
+        lookHueMixRatio: stage.editAgXHueMix ?? d.lookHueMixRatio,
+        blackRelativeEV: stage.editAgXBlackPointSource ?? d.blackRelativeEV,
+        whiteRelativeEV: stage.editAgXWhitePointSource ?? d.whiteRelativeEV,
+        contrast: stage.editAgXContrast ?? d.contrast
+    )
+}
+
 /// Builds every `ColorBalanceRGBParameters` field from `stage`'s stored edits, except that the
 /// "Color Wheels" group (12 Y/C/H fields) and the "Balance" group (Chroma/Vibrance) each fall back
 /// to `ColorBalanceRGBParameters.darktableDefault`'s neutral value — not just the stored edit's own
@@ -181,6 +198,7 @@ func stageParameters(for stage: Stage, detailEnabled: Bool) -> StageParameters {
     StageParameters(
         dehaze: dehazeParameters(for: stage, detailEnabled: detailEnabled),
         filmicRGB: filmicParameters(for: stage),
+        agx: agxParameters(for: stage),
         colorBalanceRGB: colorBalanceParameters(for: stage),
         colorZones: colorZonesParameters(for: stage),
         rgbCurve: rgbCurveParameters(for: stage),
@@ -263,6 +281,34 @@ func filmicHasAdjustments(_ stage: Stage) -> Bool {
     stage.editFilmicWhitePointSource != nil || stage.editFilmicBlackPointSource != nil
         || stage.editFilmicContrast != nil || stage.editFilmicLatitude != nil
         || stage.editFilmicSaturation != nil || stage.editFilmicBalance != nil
+}
+
+func agxHasAdjustments(_ stage: Stage) -> Bool {
+    stage.editAgXWhitePointSource != nil || stage.editAgXBlackPointSource != nil
+        || stage.editAgXContrast != nil || stage.editAgXSlope != nil || stage.editAgXLift != nil
+        || stage.editAgXBrightness != nil || stage.editAgXSaturation != nil || stage.editAgXHueMix != nil
+}
+
+// MARK: - Tone mapper selection
+
+/// Filmic and AgX are alternative tone mappers for the same pipeline slot (see
+/// `RawImageRenderer.applyStage(_:to:)`) — this is a UI-only selection, not a persisted field;
+/// it's derived from/written back to `Stage.editFilmicEnabled`/`editAgXEnabled` directly.
+enum ToneMapper: Hashable {
+    case off, filmic, agx
+}
+
+func toneMapper(for stage: Stage) -> ToneMapper {
+    if stage.editFilmicEnabled { return .filmic }
+    if stage.editAgXEnabled { return .agx }
+    return .off
+}
+
+/// The single place mutual exclusivity between Filmic and AgX is enforced: sets exactly one of
+/// `editFilmicEnabled`/`editAgXEnabled` `true` (or neither, for `.off`) and the other `false`.
+func setToneMapper(_ stage: Stage, to mapper: ToneMapper) {
+    stage.editFilmicEnabled = mapper == .filmic
+    stage.editAgXEnabled = mapper == .agx
 }
 
 func colorWheelsHasAdjustments(_ stage: Stage) -> Bool {
