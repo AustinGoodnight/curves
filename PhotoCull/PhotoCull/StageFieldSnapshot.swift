@@ -6,7 +6,7 @@ import SwiftData
 /// the shared building block for both `EditHistory` (in-memory undo/redo diffing, hence
 /// `Equatable`) and `AssetVersionSnapshot` (persisted named versions, hence `Codable`). Field list
 /// mirrors `Stage.swift` exactly; keep the two in sync when a module gains/loses a field.
-struct StageFieldSnapshot: Codable, Equatable {
+struct StageFieldSnapshot: Codable, Equatable, Sendable {
     var editDehazeAmount: Double?
 
     var editFilmicEnabled: Bool

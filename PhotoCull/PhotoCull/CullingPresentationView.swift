@@ -154,6 +154,7 @@ struct CullingPresentationView: View {
 
         if let rating = Int(press.characters), (0...5).contains(rating), press.modifiers.isEmpty {
             current.rating = rating
+            persistSidecars(for: current)
             onDataChanged()
             return .handled
         }
@@ -161,14 +162,17 @@ struct CullingPresentationView: View {
         switch press.characters.lowercased() {
         case "p":
             current.flag = current.flag == .pick ? .none : .pick
+            persistSidecars(for: current)
             onDataChanged()
             return .handled
         case "r":
             current.flag = current.flag == .reject ? .none : .reject
+            persistSidecars(for: current)
             onDataChanged()
             return .handled
         case "u":
             current.flag = .none
+            persistSidecars(for: current)
             onDataChanged()
             return .handled
         case "s":
@@ -338,6 +342,7 @@ private struct CullingRatingEditor: View {
             ForEach(1...5, id: \.self) { star in
                 Button {
                     asset.rating = asset.rating == star ? 0 : star
+                    persistSidecars(for: asset)
                     onChange()
                 } label: {
                     Image(systemName: star <= asset.rating ? "star.fill" : "star")
@@ -367,6 +372,7 @@ private struct CullingFlagEditor: View {
         let isActive = asset.flag == flag
         return Button {
             asset.flag = isActive ? .none : flag
+            persistSidecars(for: asset)
             onChange()
         } label: {
             Image(systemName: systemImage).font(.title3)

@@ -259,4 +259,13 @@ public final class PhotoAsset {
         }
         return URL(fileURLWithPath: filePath)
     }
+
+    /// The `.curve` sidecar co-located with the original file — always appends onto the full
+    /// original filename (`IMG_1234.ARW` → `IMG_1234.ARW.curve`), never strips/replaces its
+    /// extension. RAW+JPG pairs of the same shot are separate `PhotoAsset`s (matched later by
+    /// `baseFileName`, not paired at import) — stripping the extension before appending would give
+    /// both the same sidecar filename and collide them.
+    public func sidecarURL() -> URL {
+        resolvedURL().appendingPathExtension("curve")
+    }
 }

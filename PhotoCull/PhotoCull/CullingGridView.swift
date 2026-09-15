@@ -292,6 +292,7 @@ struct CullingGridView: View {
 
         if let rating = Int(press.characters), (0...5).contains(rating), press.modifiers.isEmpty {
             for asset in targets { asset.rating = rating }
+            persistSidecars(for: targets)
             onDataChanged()
             return .handled
         }
@@ -303,6 +304,7 @@ struct CullingGridView: View {
             } else {
                 for asset in targets { asset.flag = .pick }
             }
+            persistSidecars(for: targets)
             onDataChanged()
             return .handled
         case "r":
@@ -311,10 +313,12 @@ struct CullingGridView: View {
             } else {
                 for asset in targets { asset.flag = .reject }
             }
+            persistSidecars(for: targets)
             onDataChanged()
             return .handled
         case "u":
             for asset in targets { asset.flag = .none }
+            persistSidecars(for: targets)
             onDataChanged()
             return .handled
         case "g":

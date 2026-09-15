@@ -47,6 +47,10 @@ struct ContentView: View {
     @State private var importStatus: String?
     @State private var isShowingSessionPicker = false
     @State private var pendingImportFiles: [URL] = []
+    /// The folder just scanned by `importFolder()`, carried through to the session picker sheet so
+    /// `onCreate` can bind the new `Session` to it. Only ever shown to the user (and thus only ever
+    /// needed) when no existing session already matches this folder — see `importFolder()`.
+    @State private var pendingImportFolderURL: URL?
     @State private var newSessionName = ""
 
     @State private var detailStore = DetailStore()
@@ -104,6 +108,7 @@ struct ContentView: View {
                 }
             }
             .task {
+                await migrateToSidecarsIfNeeded()
                 backfillMissingSessions()
                 cleanupLegacyStackKindStages()
                 backfillMissingStackStages()
@@ -168,26 +173,23 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShowingSessionPicker) {
             SessionPickerSheet(
-                sessions: sessions,
                 newSessionName: $newSessionName,
-                onPick: { session in
-                    isShowingSessionPicker = false
-                    performImport(files: pendingImportFiles, session: session)
-                    pendingImportFiles = []
-                },
                 onCreate: { name in
                     let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else { return }
-                    let session = Session(name: trimmed)
+                    guard !trimmed.isEmpty, let folderURL = pendingImportFolderURL else { return }
+                    let session = Session(name: trimmed, folderURL: folderURL)
                     modelContext.insert(session)
+                    KnownSessionFolders.record(session)
                     isShowingSessionPicker = false
                     performImport(files: pendingImportFiles, session: session)
                     pendingImportFiles = []
+                    pendingImportFolderURL = nil
                     newSessionName = ""
                 },
                 onCancel: {
                     isShowingSessionPicker = false
                     pendingImportFiles = []
+                    pendingImportFolderURL = nil
                 }
             )
         }
@@ -239,16 +241,91 @@ struct ContentView: View {
 
     private func closeEditor() {
         try? modelContext.save()
+        // `EditHistory.commit()` writes this asset's own `.curve` and the scene/stack manifest
+        // promptly on every settled edit, but deliberately does *not* fan out to every other
+        // member's `.curve` on each tick (see its doc comment) — so a sibling's redundant
+        // `sceneStageCopy`/routed stage fields can lag until it's next written for its own reason.
+        // Closing the editor is a natural, low-frequency point to catch it up: only one asset can
+        // ever be open at a time, so "every sibling of whatever was just being edited" is the whole
+        // set that could have gone stale this session.
+        if let asset = detailStore.editingAsset {
+            if let scene = asset.scene { persistSidecars(for: scene.photos ?? []) }
+            if let stack = asset.stack { persistSidecars(for: stack.photos ?? []) }
+        }
         detailStore.editingAsset = nil
     }
 
+    /// One-time migration for a store that predates sidecar persistence — gated by a `UserDefaults`
+    /// flag, and safe to interrupt: every step only ever writes what's *missing* (an empty
+    /// `folderPath`, a sidecar that doesn't exist on disk yet), never overwrites something already
+    /// there, so a partial pass just means the next launch's pass picks up wherever this one left
+    /// off, rather than redoing or corrupting anything. Writes are `await`ed directly (not the
+    /// fire-and-forget `persistSidecars(for:)` every live-editing call site uses) specifically so
+    /// this function can't mark itself done before the sidecars it just wrote actually reached disk.
+    private func migrateToSidecarsIfNeeded() async {
+        let flagKey = "hasMigratedToSidecars"
+        guard !UserDefaults.standard.bool(forKey: flagKey) else { return }
+
+        // Backfill folder identity on any `Session` that predates it (`folderPath` defaults to ""
+        // via SwiftData's lightweight migration for a field that didn't exist before). Majority
+        // folder wins; any asset whose file lives elsewhere is split into its own new, per-folder
+        // Session — a Session must map 1:1 to a folder going forward (see its doc comment), and
+        // this is the one place an existing Session might not already satisfy that.
+        let sessions = (try? modelContext.fetch(FetchDescriptor<Session>())) ?? []
+        for session in sessions where session.folderPath.isEmpty {
+            let members = session.photos ?? []
+            guard !members.isEmpty else { continue }
+            let byFolder = Dictionary(grouping: members) { $0.resolvedURL().deletingLastPathComponent() }
+            guard let majorityFolder = byFolder.max(by: { $0.value.count < $1.value.count })?.key else { continue }
+            session.folderPath = majorityFolder.path
+            session.folderBookmarkData = try? majorityFolder.bookmarkData(options: [.minimalBookmark])
+            KnownSessionFolders.record(session)
+            for (folder, strayMembers) in byFolder where folder != majorityFolder {
+                let straySession = Session(name: "\(session.name) (split)", folderURL: folder)
+                modelContext.insert(straySession)
+                KnownSessionFolders.record(straySession)
+                for asset in strayMembers { asset.session = straySession }
+            }
+        }
+
+        let assets = (try? modelContext.fetch(FetchDescriptor<PhotoAsset>())) ?? []
+        for asset in assets where !FileManager.default.fileExists(atPath: asset.sidecarURL().path) {
+            await SidecarWriter.shared.write(CurveSidecar(capturing: asset), to: asset.sidecarURL())
+        }
+        let scenes = (try? modelContext.fetch(FetchDescriptor<PhotoScene>())) ?? []
+        for scene in scenes {
+            guard let session = scene.session else { continue }
+            let url = session.sceneManifestURL(sceneID: scene.id)
+            guard !FileManager.default.fileExists(atPath: url.path) else { continue }
+            await SidecarWriter.shared.write(SceneSidecar(capturing: scene), to: url)
+        }
+        let stacks = (try? modelContext.fetch(FetchDescriptor<PhotoStack>())) ?? []
+        for stack in stacks {
+            guard let session = stack.photos?.first?.session else { continue }
+            let url = session.stackManifestURL(stackID: stack.id)
+            guard !FileManager.default.fileExists(atPath: url.path) else { continue }
+            await SidecarWriter.shared.write(StackSidecar(capturing: stack), to: url)
+        }
+
+        try? modelContext.save()
+        UserDefaults.standard.set(true, forKey: flagKey)
+    }
+
+    /// One session per distinct containing folder, not one shared catch-all — `Session` now maps
+    /// 1:1 to a folder (see its doc comment), and orphaned assets found here could in principle
+    /// come from anywhere, so a single shared session would risk violating that invariant the
+    /// moment two orphans turn out to live in different folders.
     private func backfillMissingSessions() {
         let orphaned = allAssets.filter { $0.session == nil }
         guard !orphaned.isEmpty else { return }
-        let session = Session(name: "Imported Library")
-        modelContext.insert(session)
-        for asset in orphaned {
-            asset.session = session
+        let byFolder = Dictionary(grouping: orphaned) { $0.resolvedURL().deletingLastPathComponent() }
+        for (folderURL, assets) in byFolder {
+            let session = Session(name: "Imported Library", folderURL: folderURL)
+            modelContext.insert(session)
+            KnownSessionFolders.record(session)
+            for asset in assets {
+                asset.session = session
+            }
         }
         try? modelContext.save()
     }
@@ -575,7 +652,18 @@ struct ContentView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         let files = LibraryImporter().scanFolder(at: url, recursive: recursiveOption.recursive)
+
+        // A `Session` maps 1:1 to a folder (see `Session`'s doc comment) — if this exact folder
+        // already has one, importing into it (e.g. re-running import after adding more files to the
+        // card) resumes silently rather than asking the user to pick from a list that, by
+        // construction, can never contain a valid *different* choice for this folder.
+        if let existing = sessions.first(where: { $0.resolvedFolderURL().path == url.path }) {
+            performImport(files: files, session: existing)
+            return
+        }
+
         pendingImportFiles = files
+        pendingImportFolderURL = url
         newSessionName = ""
         isShowingSessionPicker = true
     }
@@ -584,12 +672,31 @@ struct ContentView: View {
         let importer = LibraryImporter()
         do {
             let imported = try importer.importFiles(files, into: modelContext, session: session)
-            // Applies the "Default Stage" preset (if any) to each newly-imported photo's own
-            // `.single` stage — see `StageFieldSnapshot.applyDefaultIfAvailable(to:context:)`. Not
-            // done inside `LibraryImporter` itself: that lives in the PhotoCatalog package, which
-            // has no visibility into `Preset`/`StageFieldSnapshot` (both app-target types).
+            // Per newly-imported photo: if a `.curve` sidecar already sits beside the file (e.g.
+            // re-importing a folder that has sidecars from a previous run of this app, or from
+            // another machine), real edit history wins — adopt it. Otherwise this is a genuinely
+            // new file: apply the "Default Stage" preset, if any (see
+            // `StageFieldSnapshot.applyDefaultIfAvailable(to:context:)`, not done inside
+            // `LibraryImporter` itself since that lives in the PhotoCatalog package, which has no
+            // visibility into `Preset`/`StageFieldSnapshot`), then write a fresh baseline sidecar so
+            // this photo has one from the moment it enters the library.
+            //
+            // Only the asset's own base params + single stage are adopted here — recreating custom
+            // stages/version history needs to insert new `Stage`/`AssetVersion` rows into
+            // `modelContext`, which is a full library rebuild's job (see the sidecar-persistence
+            // plan's read/rebuild phase), not a normal re-import's.
             for asset in imported {
-                StageFieldSnapshot.applyDefaultIfAvailable(to: asset.singleStage, context: modelContext)
+                if let data = try? Data(contentsOf: asset.sidecarURL()),
+                   let sidecar = try? JSONDecoder().decode(CurveSidecar.self, from: data) {
+                    sidecar.baseFields.apply(to: asset)
+                    asset.ratingRaw = sidecar.rating
+                    asset.flagRaw = sidecar.flagRaw
+                    asset.colorLabelRaw = sidecar.colorLabelRaw
+                    sidecar.singleStage.apply(to: asset.singleStage)
+                } else {
+                    StageFieldSnapshot.applyDefaultIfAvailable(to: asset.singleStage, context: modelContext)
+                    persistSidecars(for: asset)
+                }
             }
             let count = imported.count
             importStatus = "Imported \(count) new file\(count == 1 ? "" : "s") (\(files.count) file\(files.count == 1 ? "" : "s") found)."
@@ -614,10 +721,10 @@ struct ContentView: View {
     /// many groups in one pass and batches those into a single save/refresh at the end instead of
     /// paying the cost once per group.
     private func groupIntoStack(_ assets: [PhotoAsset]) {
-        var touchedStacks = Set<PhotoStack>()
+        var touchedStacks: [PhotoStack: Session] = [:]
         for asset in assets {
             if let old = asset.stack {
-                touchedStacks.insert(old)
+                if let session = asset.session { touchedStacks[old] = session }
                 asset.stack = nil
             }
         }
@@ -626,9 +733,14 @@ struct ContentView: View {
         for asset in assets {
             asset.stack = newStack
         }
-        for old in touchedStacks where (old.photos?.isEmpty ?? true) {
+        for (old, session) in touchedStacks where (old.photos?.isEmpty ?? true) {
+            deleteSidecarManifest(for: old, session: session)
             modelContext.delete(old)
         }
+        // Every unstacked-then-restacked asset's `.curve` needs its `stackID` pointer refreshed,
+        // and the new stack needs its `.stack` manifest written at least once so it exists on disk
+        // even before any value-level edit ever touches its shared stage.
+        persistSidecars(for: assets)
     }
 
     /// The toolbar's "Sync" button — scans the *whole* library (not just what's currently filtered/
@@ -662,19 +774,24 @@ struct ContentView: View {
 
     private func unstackSelected() {
         let selected = allAssets.filter { detailStore.selection.contains($0.id) }
-        var touchedStacks = Set<PhotoStack>()
+        var touchedStacks: [PhotoStack: Session] = [:]
         for asset in selected {
-            if let stack = asset.stack {
-                touchedStacks.insert(stack)
+            if let stack = asset.stack, let session = asset.session {
+                touchedStacks[stack] = session
             }
         }
-        for stack in touchedStacks {
-            for member in stack.photos ?? [] {
+        var formerMembers: [PhotoAsset] = []
+        for (stack, session) in touchedStacks {
+            let members = stack.photos ?? []
+            formerMembers.append(contentsOf: members)
+            for member in members {
                 member.stack = nil
             }
+            deleteSidecarManifest(for: stack, session: session)
             modelContext.delete(stack)
         }
         try? modelContext.save()
+        persistSidecars(for: formerMembers)
         detailStore.refreshTrigger += 1
         refreshFilteredAssets()
     }
@@ -685,17 +802,22 @@ struct ContentView: View {
             asset.scene = scene
         }
         try? modelContext.save()
+        persistSidecars(for: selected)
         detailStore.refreshTrigger += 1
         refreshFilteredAssets()
     }
 
     private func removeSelectedFromCurrentScene() {
         guard let selectedScene else { return }
-        let selected = allAssets.filter { detailStore.selection.contains($0.id) }
-        for asset in selected where asset.scene?.id == selectedScene.id {
+        let selected = allAssets.filter { detailStore.selection.contains($0.id) && $0.scene?.id == selectedScene.id }
+        for asset in selected {
             asset.scene = nil
         }
         try? modelContext.save()
+        persistSidecars(for: selected)
+        if let session = selectedScene.session {
+            persistSidecar(for: selectedScene, session: session)
+        }
         detailStore.refreshTrigger += 1
         refreshFilteredAssets()
     }
@@ -708,19 +830,24 @@ struct ContentView: View {
         guard !trimmed.isEmpty, let session = detailStore.newSceneSession else { return }
         let scene = PhotoScene(name: trimmed, session: session)
         modelContext.insert(scene)
+        var assignedMembers: [PhotoAsset] = []
         if !detailStore.pendingSceneAssetIDs.isEmpty {
             let targeted = allAssets.filter { detailStore.pendingSceneAssetIDs.contains($0.id) }
             for asset in targeted {
                 asset.scene = scene
             }
+            assignedMembers = targeted
             detailStore.pendingSceneAssetIDs = []
         } else if addSelection {
             let selected = allAssets.filter { detailStore.selection.contains($0.id) }
             for asset in selected {
                 asset.scene = scene
             }
+            assignedMembers = selected
         }
         try? modelContext.save()
+        persistSidecars(for: assignedMembers)
+        persistSidecar(for: scene, session: session)
         detailStore.newSceneName = ""
         detailStore.newSceneSession = nil
         selectedScene = scene
@@ -755,6 +882,8 @@ struct ContentView: View {
             asset.scene = scene
         }
         try? modelContext.save()
+        persistSidecars(for: selected)
+        persistSidecar(for: scene, session: session)
         detailStore.quickSceneName = ""
         detailStore.isShowingScenePicker = false
         detailStore.refreshTrigger += 1
@@ -765,8 +894,17 @@ struct ContentView: View {
         if selectedScene?.id == scene.id {
             selectedScene = nil
         }
+        // Captured before the delete: `.nullify` clears every member's `asset.scene` and the
+        // scene's own `session` the instant the row is gone, so both are needed now to update the
+        // former members' `.curve` files and remove the manifest afterward.
+        let formerMembers = scene.photos ?? []
+        let session = scene.session
         modelContext.delete(scene)
         try? modelContext.save()
+        persistSidecars(for: formerMembers)
+        if let session {
+            deleteSidecarManifest(for: scene, session: session)
+        }
         detailStore.refreshTrigger += 1
         refreshFilteredAssets()
     }

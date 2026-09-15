@@ -279,6 +279,12 @@ struct EditorView: View {
                 return CIContext().createCGImage(ciImage, from: ciImage.extent)
             }.value
         }
+        // Flushes any edit still sitting in `history`'s 400ms debounce window when the editor
+        // closes — see `EditHistory.flush()`'s doc comment for why an unflushed pending write would
+        // otherwise be silently lost along with this view's `@State`.
+        .onDisappear {
+            history.flush()
+        }
     }
 
     /// Micro toolbar floating on the preview pane's own background, centered above the image —

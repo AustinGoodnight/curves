@@ -1,13 +1,13 @@
 import SwiftUI
 import PhotoCatalog
 
-/// Shown after picking a folder to import — the user must pick an existing `Session` (e.g. a
-/// second card from the same shoot day) or name a new one before the import actually runs, since
-/// every `PhotoAsset` belongs to exactly one session for its whole life.
+/// Shown after picking a folder to import, only when that folder isn't already bound to an
+/// existing `Session` — `ContentView.importFolder()` resumes silently into an already-bound
+/// session instead of showing this sheet. Since a `Session` maps 1:1 to a folder (see its doc
+/// comment), there's never a valid *existing* session to offer for a folder that reaches this
+/// sheet at all — naming a new one is the only choice.
 struct SessionPickerSheet: View {
-    let sessions: [Session]
     @Binding var newSessionName: String
-    var onPick: (Session) -> Void
     var onCreate: (String) -> Void
     var onCancel: () -> Void
 
@@ -15,24 +15,9 @@ struct SessionPickerSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Import Into Session")
                 .font(.headline)
-            Text("Choose an existing session or create a new one for these photos.")
+            Text("Name a new session for these photos.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-
-            if !sessions.isEmpty {
-                List(sessions) { session in
-                    Button {
-                        onPick(session)
-                    } label: {
-                        Label(session.name, systemImage: "calendar")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .frame(minHeight: 120, maxHeight: 220)
-                .listStyle(.inset)
-            }
 
             HStack {
                 TextField("New Session Name", text: $newSessionName)

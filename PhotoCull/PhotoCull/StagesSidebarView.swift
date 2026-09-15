@@ -214,7 +214,10 @@ struct StagesSidebarView: View {
             Button("Cancel", role: .cancel) {}
             Button("Rename") {
                 let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { renamingStage?.name = trimmed }
+                if !trimmed.isEmpty {
+                    renamingStage?.name = trimmed
+                    persistSidecars(for: asset)
+                }
             }
         }
         .alert("Save Preset", isPresented: Binding(
@@ -238,7 +241,10 @@ struct StagesSidebarView: View {
             Button("Cancel", role: .cancel) {}
             Button("Rename") {
                 let trimmed = renameVersionText.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { renamingVersion?.name = trimmed }
+                if !trimmed.isEmpty {
+                    renamingVersion?.name = trimmed
+                    persistSidecars(for: asset)
+                }
             }
         }
         .alert("New Branch", isPresented: Binding(
@@ -406,6 +412,7 @@ struct StagesSidebarView: View {
         )
         modelContext.insert(version)
         asset.currentVersionID = version.id
+        persistSidecars(for: asset)
     }
 
     /// Decodes `version` and writes it onto `asset`/`asset.singleStage`, moves "current" to it
@@ -442,6 +449,7 @@ struct StagesSidebarView: View {
     private func deleteVersion(_ version: AssetVersion) {
         if asset.currentVersionID == version.id { asset.currentVersionID = nil }
         modelContext.delete(version)
+        persistSidecars(for: asset)
     }
 
     /// Custom stages start with nothing set on any of the four kernel modules — a genuine blank
@@ -636,5 +644,10 @@ struct StagesSidebarView: View {
     private func refreshAndRender() {
         activeStages = activeStageStack(for: asset)
         scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator)
+        // Every call site is a *structural* change (add/delete/enable-toggle a stage) — these
+        // bypass `EditHistory` (see `history`'s doc comment above), so they'd otherwise never
+        // trigger a sidecar write at all. One shared chokepoint here covers all of them, same as
+        // `EditHistory.commit()` does for value-level edits.
+        persistSidecars(for: asset)
     }
 }

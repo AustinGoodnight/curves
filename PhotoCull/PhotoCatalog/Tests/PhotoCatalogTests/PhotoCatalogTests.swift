@@ -12,7 +12,7 @@ struct PhotoCatalogTests {
     }
 
     @Test func ratingClampsToValidRange() {
-        let asset = PhotoAsset(filePath: "/tmp/a.cr2", fileName: "a.cr2", fileExtension: "cr2", session: Session(name: "Test"))
+        let asset = PhotoAsset(filePath: "/tmp/a.cr2", fileName: "a.cr2", fileExtension: "cr2", session: Session(name: "Test", folderURL: URL(fileURLWithPath: "/tmp")))
         asset.rating = 9
         #expect(asset.rating == 5)
         asset.rating = -3
@@ -20,7 +20,7 @@ struct PhotoCatalogTests {
     }
 
     @Test func flagRoundTripsThroughRawStorage() {
-        let asset = PhotoAsset(filePath: "/tmp/a.cr2", fileName: "a.cr2", fileExtension: "cr2", session: Session(name: "Test"))
+        let asset = PhotoAsset(filePath: "/tmp/a.cr2", fileName: "a.cr2", fileExtension: "cr2", session: Session(name: "Test", folderURL: URL(fileURLWithPath: "/tmp")))
         asset.flag = .pick
         #expect(asset.flagRaw == FlagState.pick.rawValue)
         #expect(asset.flag == .pick)
@@ -39,7 +39,7 @@ struct PhotoCatalogTests {
         let fileURL = dir.appendingPathComponent("shot.cr2")
         try Data([0x00, 0x01]).write(to: fileURL)
 
-        let session = Session(name: "Day 1")
+        let session = Session(name: "Day 1", folderURL: dir)
         context.insert(session)
 
         let importer = LibraryImporter()
@@ -64,8 +64,8 @@ struct PhotoCatalogTests {
         let fileURL = dir.appendingPathComponent("shot.cr2")
         try Data([0x00, 0x01]).write(to: fileURL)
 
-        let sessionA = Session(name: "Day 1")
-        let sessionB = Session(name: "Day 2")
+        let sessionA = Session(name: "Day 1", folderURL: dir)
+        let sessionB = Session(name: "Day 2", folderURL: dir)
         context.insert(sessionA)
         context.insert(sessionB)
 

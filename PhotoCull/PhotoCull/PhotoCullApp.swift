@@ -56,10 +56,19 @@ struct PhotoCullApp: App {
             // the only way *past* the crash was manually deleting the store — which is what was
             // actually destroying edits on every schema change. Move the incompatible store aside
             // (timestamped, never deleted) and start fresh instead, so a schema change costs a
-            // clean slate rather than a stuck app plus a forced wipe.
+            // rescan rather than a stuck app plus a forced wipe.
             Self.backUpIncompatibleStore(at: config.url)
             do {
-                return try ModelContainer(for: schema, configurations: [config])
+                let freshContainer = try ModelContainer(for: schema, configurations: [config])
+                // The fresh container has zero rows — SwiftData was never the source of truth,
+                // sidecar files on disk are (see `CacheRebuilder`'s doc comment). Rebuild
+                // synchronously, before this container is ever handed to a live view, so the first
+                // frame the user sees already has their library back rather than a briefly-empty
+                // one that repopulates out from under them.
+                MainActor.assumeIsolated {
+                    CacheRebuilder.rebuild(context: ModelContext(freshContainer))
+                }
+                return freshContainer
             } catch {
                 fatalError("Could not create ModelContainer even after backing up the incompatible store: \(error)")
             }

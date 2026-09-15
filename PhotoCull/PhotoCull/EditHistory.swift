@@ -107,6 +107,32 @@ final class EditHistory {
             entries.append(Entry(label: label, date: Date(), snapshot: after))
             currentIndex = entries.count - 1
         }
+        writeSidecars(for: asset)
+    }
+
+    /// Persists `asset`'s `.curve` sidecar, plus its scene/stack's `.scene`/`.stack` manifest if it
+    /// belongs to one, once a burst of edits has settled — the sidecar-persistence counterpart to
+    /// the undo-history commit above, reusing the exact same debounce rather than building a second
+    /// one. `persistSidecars(for:)` (`SidecarSync.swift`) is the one shared implementation every
+    /// other, non-debounced mutation site also calls directly; scene/stack manifests are refreshed
+    /// on every settled edit to any member (not just ones that touch the shared stage) — one extra
+    /// small write per edit burst, never a per-member fan-out, since the manifest is what's
+    /// authoritative, not each member's own redundant copy (see `CurveSidecar.sceneStageCopy`'s doc
+    /// comment).
+    private func writeSidecars(for asset: PhotoAsset) {
+        persistSidecars(for: asset)
+    }
+
+    /// Cancels any pending debounced settle and commits immediately — call when the editor is about
+    /// to close. Without this, an edit made just before closing can be silently dropped: the
+    /// pending `Task` in `registerChange` captures `self` weakly, so once this instance is
+    /// deallocated (the editor view tearing down) the settle's `guard let self` simply fails and
+    /// `commit()` — and the sidecar write it triggers — never runs.
+    func flush() {
+        guard settleTask != nil else { return }
+        settleTask?.cancel()
+        settleTask = nil
+        commit()
     }
 
     func undo() {
