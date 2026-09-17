@@ -226,7 +226,7 @@ struct PhotoThumbnailCell: View {
                 .truncationMode(.middle)
                 .foregroundStyle(.secondary)
         }
-        .task(id: asset.filePath) {
+        .task(id: "\(asset.filePath)#\(ThumbnailInvalidationBus.shared.box(for: asset.filePath).value)") {
             await loadThumbnail()
         }
     }

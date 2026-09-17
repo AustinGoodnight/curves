@@ -47,7 +47,7 @@ struct CompactPhotoThumbnail: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(isCurrent ? uiColors.accentColor : .clear, lineWidth: 3)
         )
-        .task(id: asset.filePath) {
+        .task(id: "\(asset.filePath)#\(ThumbnailInvalidationBus.shared.box(for: asset.filePath).value)") {
             thumbnail = await loadCachedThumbnail(for: asset)
         }
     }
@@ -98,7 +98,7 @@ private struct FilmstripThumbnail: View {
             }
         }
         .overlay(alignment: .bottomLeading) { stackBadge }
-        .task(id: asset.filePath) {
+        .task(id: "\(asset.filePath)#\(ThumbnailInvalidationBus.shared.box(for: asset.filePath).value)") {
             thumbnail = await loadCachedThumbnail(for: asset)
         }
     }

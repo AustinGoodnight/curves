@@ -220,7 +220,7 @@ struct EditorView: View {
                             .padding(.bottom, 16)
                         }
                     } else if let previewImage = coordinator.previewImage {
-                        ZoomableImagePane(previewImage: previewImage)
+                        ZoomableImagePane(previewImage: previewImage, onZoomChange: { coordinator.updateZoomResolution(scale: $0) })
                             .id(asset.filePath)
                     } else {
                         ProgressView("Decoding RAW…")
@@ -249,6 +249,10 @@ struct EditorView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: asset.filePath) {
+            let filePath = asset.filePath
+            coordinator.onSettledRender = { image in
+                updateSessionThumbnail(for: filePath, from: image)
+            }
             history.reset(asset: asset, activeStages: activeStages)
             history.onRestore = {
                 coordinator.scheduleRender(
@@ -399,6 +403,12 @@ struct EditorView: View {
 /// switching to a different photo, which the call site handles via `.id(asset.filePath)`.
 private struct ZoomableImagePane: View {
     let previewImage: CGImage
+    /// Reports the current zoom scale on every change (pinch or double-click), `nil` when this
+    /// pane has nothing to re-render at a higher resolution for — the "no edits applied" JPG
+    /// comparison pane (`EditorView`'s other `ZoomableImagePane` call site) already decodes at
+    /// full native resolution (see `jpgPreviewImage`'s doc comment), so it has no `onZoomChange`
+    /// to wire up and passes nothing here.
+    var onZoomChange: ((CGFloat) -> Void)? = nil
 
     @State private var zoomScale: CGFloat = 1
     @State private var panOffset: CGSize = .zero
@@ -447,6 +457,7 @@ private struct ZoomableImagePane: View {
                                     if zoomScale > minZoom + 0.01 {
                                         zoomScale = minZoom
                                         panOffset = .zero
+                                        onZoomChange?(zoomScale)
                                     } else {
                                         setZoom(doubleClickZoom, anchor: value.location, baseFitRect: baseFitRect, containerSize: geometry.size)
                                     }
@@ -511,6 +522,7 @@ private struct ZoomableImagePane: View {
         guard clampedScale > minZoom + 0.001 else {
             zoomScale = minZoom
             panOffset = .zero
+            onZoomChange?(zoomScale)
             return
         }
         let newSize = CGSize(width: baseFitRect.width * clampedScale, height: baseFitRect.height * clampedScale)
@@ -520,6 +532,7 @@ private struct ZoomableImagePane: View {
             CGSize(width: newCenter.x - baseFitRect.midX, height: newCenter.y - baseFitRect.midY),
             zoom: clampedScale, containerSize: containerSize
         )
+        onZoomChange?(zoomScale)
     }
 
     /// Clamps `offset` so the zoomed image never pans far enough to leave a gap between its edge

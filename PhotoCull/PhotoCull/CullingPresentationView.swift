@@ -216,7 +216,7 @@ private struct CullingMainImage: View {
             }
         }
         .overlay(alignment: .topTrailing) { flagBadge }
-        .task(id: asset.filePath) {
+        .task(id: "\(cacheKey)#\(ThumbnailInvalidationBus.shared.box(for: cacheKey).value)") {
             await load()
         }
     }
@@ -295,7 +295,7 @@ private struct CullingSideThumbnail: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
-        .task(id: asset.filePath) {
+        .task(id: "\(asset.filePath)#\(ThumbnailInvalidationBus.shared.box(for: asset.filePath).value)") {
             await loadThumbnail()
         }
     }

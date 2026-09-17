@@ -22,12 +22,34 @@ final class EditorRenderCoordinator {
     private(set) var colorDensity: [Float] = []
     private(set) var isReady = false
 
+    /// Called with a freshly-rendered, non-draft preview whenever one finishes — `EditorView` uses
+    /// this only to refresh the cached grid/filmstrip thumbnail so it reflects the edit (see
+    /// `updateSessionThumbnail(for:from:)`). Never fired for a draft (mid-drag) render — regenerating
+    /// a thumbnail on every slider tick would be exactly the per-tick cost this project's CLAUDE.md
+    /// warns against; the settle pass in `startRenderLoopIfNeeded` already gives one crisp render per
+    /// pause, which is the right cadence for this too.
+    var onSettledRender: ((CGImage) -> Void)?
+
     /// A base-params + stage-stack pair — everything one render needs. Bundled into one struct
     /// rather than two parallel optionals so `latestParams`/`lastRenderedParams` can't desync.
     struct RenderRequest: Equatable {
         var baseParams: RawBaseParameters
         var stageStack: [StageParameters]
+        var maxPixelSize: CGFloat
     }
+
+    /// The preview resolution used while unzoomed — sized for a comfortable editor pane, not for
+    /// pixel peeping. `ZoomableImagePane` requests a larger decode via `updateZoomResolution` once
+    /// the user zooms past 1x; see that method's doc comment for why stretching this fixed decode
+    /// instead would look soft at high zoom.
+    static let basePreviewPixelSize: CGFloat = 1600
+
+    /// The target `maxPixelSize` for the *next* render — distinct from what's currently on screen
+    /// (`lastRenderedParams.maxPixelSize`), since a zoom change should take effect on the next
+    /// render pass without needing every other render call site to know about zoom. Reset to
+    /// `basePreviewPixelSize` on every photo switch (`loadAndRender`) so a new photo always opens
+    /// at base resolution regardless of how zoomed in the previous one was.
+    private var targetMaxPixelSize: CGFloat = EditorRenderCoordinator.basePreviewPixelSize
 
     private var histogramGeneration = 0
     /// Bumped on every `scheduleRender` call — used only to detect "input has actually gone
@@ -43,16 +65,20 @@ final class EditorRenderCoordinator {
     private var lastRenderedParams: RenderRequest?
 
     func loadAndRender(url: URL, baseParams: RawBaseParameters, stageStack: [StageParameters]) async {
-        let request = RenderRequest(baseParams: baseParams, stageStack: stageStack)
+        targetMaxPixelSize = Self.basePreviewPixelSize
+        let request = RenderRequest(baseParams: baseParams, stageStack: stageStack, maxPixelSize: targetMaxPixelSize)
         let (loaded, image) = await Task.detached(priority: .userInitiated) { [renderer] () -> (Bool, CGImage?) in
             let loaded = renderer.load(url: url)
             guard loaded else { return (false, nil) }
-            return (true, renderer.renderPreview(baseParams: request.baseParams, stageStack: request.stageStack, maxPixelSize: 1600))
+            return (true, renderer.renderPreview(baseParams: request.baseParams, stageStack: request.stageStack, maxPixelSize: request.maxPixelSize))
         }.value
         isReady = loaded
         previewImage = image
         lastRenderedParams = request
-        if let image { updateHistograms(from: image) }
+        if let image {
+            updateHistograms(from: image)
+            onSettledRender?(image)
+        }
     }
 
     /// Starts rendering immediately — a debounce here (waiting for a gap of silence before doing
@@ -64,7 +90,33 @@ final class EditorRenderCoordinator {
     /// needs.
     func scheduleRender(baseParams: RawBaseParameters, stageStack: [StageParameters]) {
         debounceGeneration += 1
-        latestParams = RenderRequest(baseParams: baseParams, stageStack: stageStack)
+        latestParams = RenderRequest(baseParams: baseParams, stageStack: stageStack, maxPixelSize: targetMaxPixelSize)
+        startRenderLoopIfNeeded()
+    }
+
+    /// Called by `ZoomableImagePane` as the user pinch-zooms the (non-editing) preview. The plain
+    /// preview `Image` just stretches `previewImage` via `.scaleEffect` — fine up to 1x, but past
+    /// that it's visibly soft, since `renderPreview` decoded at only `basePreviewPixelSize` to keep
+    /// editing snappy. Re-decoding at a size that matches the current zoom (still capped by
+    /// `renderPreview`'s own "never upscale past native" tail-scale, and by `decodedImage`'s RAW
+    /// `scaleFactor` clamp) fixes that without changing the base (unzoomed) editing resolution.
+    ///
+    /// Reuses `latestParams`/`startRenderLoopIfNeeded` — the same "coalesce a burst down to the
+    /// newest request, one render in flight at a time" loop slider drags already go through — so a
+    /// continuous pinch gesture doesn't queue up a backlog of superseded high-res re-decodes.
+    /// Gated behind a 10% change so trackpad jitter mid-pinch doesn't retrigger a render for a
+    /// pixel size that's effectively unchanged.
+    func updateZoomResolution(scale: CGFloat) {
+        let desired = scale > 1.01 ? Self.basePreviewPixelSize * scale : Self.basePreviewPixelSize
+        guard abs(desired - targetMaxPixelSize) / targetMaxPixelSize > 0.1, let lastRenderedParams else {
+            targetMaxPixelSize = desired
+            return
+        }
+        targetMaxPixelSize = desired
+        debounceGeneration += 1
+        latestParams = RenderRequest(
+            baseParams: lastRenderedParams.baseParams, stageStack: lastRenderedParams.stageStack, maxPixelSize: targetMaxPixelSize
+        )
         startRenderLoopIfNeeded()
     }
 
@@ -107,11 +159,12 @@ final class EditorRenderCoordinator {
         lastRenderedParams = params
         let renderer = renderer
         let image = await Task.detached(priority: .userInitiated) {
-            renderer.renderPreview(baseParams: params.baseParams, stageStack: params.stageStack, maxPixelSize: 1600, draft: draft)
+            renderer.renderPreview(baseParams: params.baseParams, stageStack: params.stageStack, maxPixelSize: params.maxPixelSize, draft: draft)
         }.value
         if let image {
             previewImage = image
             updateHistograms(from: image)
+            if !draft { onSettledRender?(image) }
         }
     }
 
