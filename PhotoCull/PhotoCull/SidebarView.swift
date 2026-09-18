@@ -17,50 +17,77 @@ struct SidebarView: View, Equatable {
 
     var body: some View {
         List {
-            ForEach(sessions) { session in
-                let isSessionSelected = selectedScene == nil && selectedSession?.id == session.id
-                Section {
-                    let scenesInSession = scenesFor(session)
-                    ForEach(Array(scenesInSession.enumerated()), id: \.element.id) { index, scene in
-                        sceneRow(scene, isLast: index == scenesInSession.count - 1, isSelected: selectedScene?.id == scene.id) {
-                            selectedSession = session
-                            selectedScene = scene
-                        }
-                        .contextMenu {
-                            Button("Delete Scene", role: .destructive) {
-                                onDeleteScene(scene)
+            Section {
+                ForEach(sessions) { session in
+                    let isSessionSelected = selectedScene == nil && selectedSession?.id == session.id
+                    Section {
+                        let scenesInSession = scenesFor(session)
+                        ForEach(Array(scenesInSession.enumerated()), id: \.element.id) { index, scene in
+                            sceneRow(scene, isLast: index == scenesInSession.count - 1, isSelected: selectedScene?.id == scene.id) {
+                                selectedSession = session
+                                selectedScene = scene
+                            }
+                            .contextMenu {
+                                Button("Delete Scene", role: .destructive) {
+                                    onDeleteScene(scene)
+                                }
                             }
                         }
+                        Button {
+                            onNewScene(session)
+                        } label: {
+                            Label("New Scene…", systemImage: "plus.circle")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 2)
+                    } header: {
+                        sessionHeader(session, isSelected: isSessionSelected)
                     }
-                    Button {
-                        onNewScene(session)
-                    } label: {
-                        Label("New Scene…", systemImage: "plus.circle")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                } header: {
-                    Button {
-                        selectedScene = nil
-                        selectedSession = session
-                    } label: {
-                        Text(session.name)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.vertical, 4)
-                    .background(isSessionSelected ? uiColors.accentColor.opacity(0.2) : Color.clear)
-                    .textCase(nil)
                 }
+            } header: {
+                // A plain group label ("SESSIONS"), not a session's own name — distinguishes "this
+                // is the list of sessions" from "this session is currently selected" (the latter is
+                // `sessionHeader`'s job, one level down). Small-caps/secondary, same convention as
+                // every other macOS sidebar's top-level group label (Finder's "Favorites", Mail's
+                // "Mailboxes").
+                Text("Sessions")
             }
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
         .background(uiColors.sidebarBackground)
         .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 300)
+    }
+
+    /// A session's own row/header — distinct from the plain "Sessions" group label above it. The
+    /// selected state used to be a full-bleed, edge-to-edge `accentColor.opacity(0.2)` rectangle,
+    /// which read as a muddy smear rather than a selection indicator once `accentColor` was a
+    /// user-customized non-neutral hue (this app lets it be any color, not just macOS blue) —
+    /// same complaint the grid's selection stroke had before it moved to a fixed white
+    /// (`PhotoThumbnailCell`). This is a rounded, inset pill in a neutral white tint instead: it
+    /// reads as "selected" regardless of what `accentColor` happens to be, and doesn't touch the
+    /// row's edges the way `.listRowBackground` (a plain rectangle) would.
+    private func sessionHeader(_ session: Session, isSelected: Bool) -> some View {
+        Button {
+            selectedScene = nil
+            selectedSession = session
+        } label: {
+            Text(session.name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 5)
+                .padding(.horizontal, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isSelected ? Color.white.opacity(0.16) : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 2)
+        .textCase(nil)
     }
 
     private func scenesFor(_ session: Session) -> [PhotoScene] {
@@ -82,10 +109,20 @@ struct SidebarView: View, Equatable {
                     .foregroundStyle(.primary)
                 Spacer(minLength: 0)
             }
+            .padding(.vertical, 5)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected ? Color.white.opacity(0.16) : Color.clear)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .listRowBackground(isSelected ? uiColors.accentColor.opacity(0.2) : Color.clear)
+        // A plain rounded fill inside the row's own content, not `.listRowBackground` — that draws
+        // a flat, edge-to-edge rectangle behind the *whole* row (same "muddy full-bleed" shape
+        // `sessionHeader`'s doc comment explains moving away from), which would fight visually with
+        // this row's own rounded/inset pill.
+        .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
     }
 }
 
