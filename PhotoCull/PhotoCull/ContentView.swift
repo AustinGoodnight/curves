@@ -130,7 +130,8 @@ struct ContentView: View {
                     detailStore.newSceneSession = session
                     detailStore.isShowingNewSceneAlert = true
                 },
-                onDeleteScene: deleteScene
+                onDeleteScene: deleteScene,
+                onImportFolder: importFolder
             )
             .equatable()
         } detail: {

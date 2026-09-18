@@ -8,6 +8,7 @@ struct SidebarView: View, Equatable {
     @Binding var selectedScene: PhotoScene?
     var onNewScene: (Session) -> Void
     var onDeleteScene: (PhotoScene) -> Void
+    var onImportFolder: () -> Void
     @Environment(ColorSchemeStore.self) private var uiColors
 
     static func == (lhs: SidebarView, rhs: SidebarView) -> Bool {
@@ -50,8 +51,20 @@ struct SidebarView: View, Equatable {
                 // is the list of sessions" from "this session is currently selected" (the latter is
                 // `sessionHeader`'s job, one level down). Small-caps/secondary, same convention as
                 // every other macOS sidebar's top-level group label (Finder's "Favorites", Mail's
-                // "Mailboxes").
-                Text("Sessions")
+                // "Mailboxes"). The import button rides beside it rather than down with the
+                // per-session "New Scene…" rows — importing adds a whole new session/folder, so it
+                // belongs at the same level as the group label, not nested under any one session.
+                HStack {
+                    Text("Sessions")
+                    Spacer()
+                    Button(action: onImportFolder) {
+                        Label("Import", systemImage: "plus")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Import a folder of photos")
+                }
             }
         }
         .listStyle(.sidebar)
