@@ -172,7 +172,7 @@ struct CullingGridView: View {
         switch item {
         case .single(let asset):
             PhotoThumbnailCell(
-                asset: asset, isSelected: selection.contains(asset.id), sceneBorder: sceneBorder,
+                asset: asset, isSelected: selection.contains(asset.id), columnCount: columnCount, sceneBorder: sceneBorder,
                 onOpenEditor: { onOpenEditor(asset) }
             )
             .id(asset.id)
@@ -183,6 +183,7 @@ struct CullingGridView: View {
                 isSelected: selection.contains(cover.id),
                 stackBadge: .collapsed(count: count),
                 onToggleStack: { onToggleStack(stack.id, true) },
+                columnCount: columnCount,
                 sceneBorder: sceneBorder,
                 onOpenEditor: { onOpenEditor(cover) }
             )
@@ -194,6 +195,7 @@ struct CullingGridView: View {
                 isSelected: selection.contains(asset.id),
                 stackBadge: .expandedMember(position: position, total: total),
                 onToggleStack: position == 1 ? { collapseStack(containing: asset) } : nil,
+                columnCount: columnCount,
                 sceneBorder: sceneBorder,
                 onOpenEditor: { onOpenEditor(asset) }
             )
