@@ -53,11 +53,11 @@ final class DetailStore {
     /// Low-frequency (one user zoom action at a time), same as `isCullingViewActive`, so it's fine
     /// to live here and be read directly by `GridPane`/`ContentView` rather than needing the
     /// `.onChange`-driven caching `selection`/`filteredAssets` require.
-    var gridColumnCount: Int = 7
+    var gridColumnCount: Int = 8
 
     /// Ordered from most zoomed-out (most, smallest columns) to most zoomed-in (fewest, largest
     /// columns) — `zoomInGrid`/`zoomOutGrid` step one entry at a time through this list.
-    static let gridColumnSteps = [12, 9, 7, 5, 4]
+    static let gridColumnSteps = [13, 10, 8, 6, 5]
 
     var canZoomInGrid: Bool {
         guard let index = Self.gridColumnSteps.firstIndex(of: gridColumnCount) else { return true }

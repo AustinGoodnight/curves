@@ -154,7 +154,7 @@ struct PhotoThumbnailCell: View {
     /// read as the photo's mat growing while the photo itself stayed the same size inside it — not
     /// what "zoom" should look like. `CullingGridView` already knows the current column count (it's
     /// how it lays out `gridColumns`), so this is just threaded down rather than measured here.
-    var columnCount: Int = 7
+    var columnCount: Int = 8
     var sceneBorder: SceneBorderInfo? = nil
     var onOpenEditor: (() -> Void)? = nil
 
@@ -162,12 +162,12 @@ struct PhotoThumbnailCell: View {
     @State private var isHovering = false
     @Environment(ColorSchemeStore.self) private var uiColors
 
-    /// 140pt at the default 7-column grid, scaled inversely with `columnCount` so a cell's height
+    /// 140pt at the default 8-column grid, scaled inversely with `columnCount` so a cell's height
     /// grows/shrinks in lockstep with its `GridItem`-driven width — plain O(1) arithmetic, not a
     /// measurement, so it's safe to read directly here despite the CLAUDE.md rule against reading
     /// expensive computed properties in `body` (that rule is about O(n) scans, not this).
     private var thumbnailHeight: CGFloat {
-        140 * 7 / CGFloat(columnCount)
+        140 * 8 / CGFloat(columnCount)
     }
 
     var body: some View {
