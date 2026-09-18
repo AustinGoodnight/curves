@@ -20,8 +20,9 @@ struct SidebarView: View, Equatable {
             ForEach(sessions) { session in
                 let isSessionSelected = selectedScene == nil && selectedSession?.id == session.id
                 Section {
-                    ForEach(scenesFor(session)) { scene in
-                        row(title: scene.name, systemImage: "rectangle.stack", isSelected: selectedScene?.id == scene.id) {
+                    let scenesInSession = scenesFor(session)
+                    ForEach(Array(scenesInSession.enumerated()), id: \.element.id) { index, scene in
+                        sceneRow(scene, isLast: index == scenesInSession.count - 1, isSelected: selectedScene?.id == scene.id) {
                             selectedSession = session
                             selectedScene = scene
                         }
@@ -66,14 +67,43 @@ struct SidebarView: View, Equatable {
         scenes.filter { $0.session?.id == session.id }
     }
 
-    private func row(title: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    /// A scene row, shown hanging off its session like a file tree's children — a vertical trunk
+    /// down the leading edge with a horizontal stub branching out to the label, in place of the
+    /// old flat `rectangle.stack` icon. `isLast` shortens the trunk to a corner (└) instead of a
+    /// tee (├) for the final scene in the session, matching how every file-tree UI (Finder's list
+    /// view, Xcode's project navigator via indentation guides) terminates a branch.
+    private func sceneRow(_ scene: PhotoScene, isLast: Bool, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+            HStack(spacing: 6) {
+                TreeConnector(isLast: isLast)
+                    .stroke(Color.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 1))
+                    .frame(width: 14)
+                Text(scene.name)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .listRowBackground(isSelected ? uiColors.accentColor.opacity(0.2) : Color.clear)
+    }
+}
+
+/// The vertical trunk + horizontal branch stub `sceneRow` draws in place of a symbol icon — sized
+/// to whatever row height the `List` gives it (no fixed height here), so it always spans the full
+/// row regardless of font/dynamic-type size. `isLast` stops the trunk at the row's vertical center
+/// instead of running it to the bottom, since a final child has nothing below it to connect to.
+private struct TreeConnector: Shape {
+    var isLast: Bool
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let trunkX = rect.minX
+        let midY = rect.midY
+        path.move(to: CGPoint(x: trunkX, y: rect.minY))
+        path.addLine(to: CGPoint(x: trunkX, y: isLast ? midY : rect.maxY))
+        path.move(to: CGPoint(x: trunkX, y: midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: midY))
+        return path
     }
 }
