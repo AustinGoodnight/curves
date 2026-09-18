@@ -147,28 +147,12 @@ struct PhotoThumbnailCell: View {
     let isSelected: Bool
     var stackBadge: StackBadge? = nil
     var onToggleStack: (() -> Void)? = nil
-    /// The grid's current column count (`DetailStore.gridColumnCount`) — used only to scale this
-    /// cell's fixed height so it stays proportional to the flexible `GridItem` width `CullingGridView`
-    /// gives each column. Without this, zooming the grid (fewer/more columns) changed cell *width*
-    /// only, since `.frame(height:)` below was a bare constant: cells got wider but not taller, which
-    /// read as the photo's mat growing while the photo itself stayed the same size inside it — not
-    /// what "zoom" should look like. `CullingGridView` already knows the current column count (it's
-    /// how it lays out `gridColumns`), so this is just threaded down rather than measured here.
-    var columnCount: Int = 8
     var sceneBorder: SceneBorderInfo? = nil
     var onOpenEditor: (() -> Void)? = nil
 
     @State private var thumbnail: CGImage?
     @State private var isHovering = false
     @Environment(ColorSchemeStore.self) private var uiColors
-
-    /// 140pt at the default 8-column grid, scaled inversely with `columnCount` so a cell's height
-    /// grows/shrinks in lockstep with its `GridItem`-driven width — plain O(1) arithmetic, not a
-    /// measurement, so it's safe to read directly here despite the CLAUDE.md rule against reading
-    /// expensive computed properties in `body` (that rule is about O(n) scans, not this).
-    private var thumbnailHeight: CGFloat {
-        140 * 8 / CGFloat(columnCount)
-    }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -215,8 +199,16 @@ struct PhotoThumbnailCell: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .padding(sceneBorder == nil ? 0 : 5)
             }
-            .frame(height: thumbnailHeight)
             .frame(maxWidth: .infinity)
+            // 4:3 rather than a bare `.frame(height:)` constant — a fixed height was completely
+            // decoupled from the actual (flexible, grid-zoom-driven) column width, which at wide
+            // zoom-out steps or wide windows made cells absurdly wide-and-short (measured ~2.1:1 at
+            // the default zoom level) and pillarboxed every portrait photo almost down to a sliver.
+            // `.aspectRatio` derives height from whatever width the `LazyVGrid` column actually
+            // resolves to, so the ratio holds regardless of window size or `DetailStore.gridColumnCount`
+            // — no need to duplicate the grid's own column math here the way the old per-columnCount
+            // height formula did.
+            .aspectRatio(4 / 3, contentMode: .fit)
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(isSelected ? uiColors.accentColor : .clear, lineWidth: 3)
