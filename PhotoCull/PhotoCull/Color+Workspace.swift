@@ -11,6 +11,14 @@ extension Color {
     /// (`ColorSchemeStore.previewBackgroundPalette`).
     static let editorPreviewBackground = Color(red: 0.18, green: 0.18, blue: 0.18)
 
+    /// The mat behind a grid thumbnail (`PhotoThumbnailCell`'s placeholder/letterbox fill) — a
+    /// static solid color, not `.gray.opacity(0.15)` layered over whatever's beneath it. A
+    /// translucent fill's rendered color depends on what's stacked under it (the scene mat, the
+    /// workspace background, a hover state), so it could shift instead of reading as one consistent
+    /// mat color across cells; matches `.gray.opacity(0.15)`'s previous look against this app's dark
+    /// workspace background.
+    static let thumbnailMatBackground = Color(red: 0.14, green: 0.14, blue: 0.14)
+
     /// The shared saturation/brightness every hue-based control background in `ColorBalanceBarView`
     /// (the 4 color wheels' arcs, Color Zones' hue-axis strip, the WB/Chr/Vib/Sat gradient faders,
     /// the XY white balance pad) is normalized onto via `normalizedVividness(_:)` below — matches

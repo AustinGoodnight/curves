@@ -152,7 +152,6 @@ struct PhotoThumbnailCell: View {
 
     @State private var thumbnail: CGImage?
     @State private var isHovering = false
-    @Environment(ColorSchemeStore.self) private var uiColors
 
     var body: some View {
         VStack(spacing: 6) {
@@ -183,7 +182,7 @@ struct PhotoThumbnailCell: View {
                     ))
                 }
                 ZStack {
-                    RoundedRectangle(cornerRadius: 6).fill(.gray.opacity(0.15))
+                    RoundedRectangle(cornerRadius: 6).fill(Color.thumbnailMatBackground)
                     if let thumbnail {
                         Image(decorative: thumbnail, scale: 1)
                             .resizable()
@@ -211,7 +210,7 @@ struct PhotoThumbnailCell: View {
             .aspectRatio(4 / 3, contentMode: .fit)
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(isSelected ? uiColors.accentColor : .clear, lineWidth: 3)
+                    .stroke(isSelected ? Color.white : .clear, lineWidth: 3)
             )
             .overlay(alignment: .topTrailing) { flagBadge }
             .overlay(alignment: .topLeading) { colorDot }
