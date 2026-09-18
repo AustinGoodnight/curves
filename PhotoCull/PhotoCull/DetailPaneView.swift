@@ -46,6 +46,39 @@ final class DetailStore {
     /// where the (untracked) rebuild function lives.
     var expandedStacks: Set<UUID> = []
 
+    /// The session grid's column count — one of `Self.gridColumnSteps`, never a value computed from
+    /// window/container width. See `CullingGridView.columnCount`'s doc comment for why this stays a
+    /// small, fixed set of prefixed steps rather than continuous `GeometryReader`-driven sizing:
+    /// that measuring pass is what caused this project's worst click-lag regression (CLAUDE.md).
+    /// Low-frequency (one user zoom action at a time), same as `isCullingViewActive`, so it's fine
+    /// to live here and be read directly by `GridPane`/`ContentView` rather than needing the
+    /// `.onChange`-driven caching `selection`/`filteredAssets` require.
+    var gridColumnCount: Int = 7
+
+    /// Ordered from most zoomed-out (most, smallest columns) to most zoomed-in (fewest, largest
+    /// columns) — `zoomInGrid`/`zoomOutGrid` step one entry at a time through this list.
+    static let gridColumnSteps = [12, 9, 7, 5, 4]
+
+    var canZoomInGrid: Bool {
+        guard let index = Self.gridColumnSteps.firstIndex(of: gridColumnCount) else { return true }
+        return index < Self.gridColumnSteps.count - 1
+    }
+
+    var canZoomOutGrid: Bool {
+        guard let index = Self.gridColumnSteps.firstIndex(of: gridColumnCount) else { return true }
+        return index > 0
+    }
+
+    func zoomInGrid() {
+        guard let index = Self.gridColumnSteps.firstIndex(of: gridColumnCount), index < Self.gridColumnSteps.count - 1 else { return }
+        gridColumnCount = Self.gridColumnSteps[index + 1]
+    }
+
+    func zoomOutGrid() {
+        guard let index = Self.gridColumnSteps.firstIndex(of: gridColumnCount), index > 0 else { return }
+        gridColumnCount = Self.gridColumnSteps[index - 1]
+    }
+
     var isShowingNewSceneAlert = false
     var newSceneName = ""
     var addSelectionToNewScene = false
@@ -243,6 +276,7 @@ struct GridPane: View, Equatable {
             assets: store.filteredAssets,
             displayItems: store.displayItems,
             selection: $store.selection,
+            columnCount: store.gridColumnCount,
             isEditMode: store.gridMode == .edit,
             onGroupStack: onGroupStack,
             onUnstack: onUnstack,
@@ -270,6 +304,39 @@ struct GridPane: View, Equatable {
                 ExportBarView(store: store)
             }
         }
+    }
+}
+
+/// Steps `DetailStore.gridColumnCount` through `DetailStore.gridColumnSteps` — fewer columns means
+/// larger photos ("zoomed in"), more columns means smaller photos ("zoomed out"). Mirrors ⌘+/⌘-,
+/// wired up as hidden buttons in `ContentView.rootView`. Pulled out as its own `View` for the same
+/// reason as `RatingFilterControl` beside it: reading `store.gridColumnCount`/`canZoomInGrid`/
+/// `canZoomOutGrid` as values means only this small view's `body` re-runs when the zoom level
+/// changes, not `ContentView`'s.
+struct GridZoomControl: View {
+    @Bindable var store: DetailStore
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                store.zoomOutGrid()
+            } label: {
+                Image(systemName: "minus.magnifyingglass")
+            }
+            .buttonStyle(.plain)
+            .disabled(!store.canZoomOutGrid)
+            .help("Zoom out (more, smaller photos)")
+
+            Button {
+                store.zoomInGrid()
+            } label: {
+                Image(systemName: "plus.magnifyingglass")
+            }
+            .buttonStyle(.plain)
+            .disabled(!store.canZoomInGrid)
+            .help("Zoom in (fewer, larger photos)")
+        }
+        .foregroundStyle(Color.secondary)
     }
 }
 

@@ -19,6 +19,10 @@ struct CullingGridView: View {
     /// depends on exactly one thing: the `displayItems` array value itself.
     let displayItems: [DisplayItem]
     @Binding var selection: Set<UUID>
+    /// One of `DetailStore.gridColumnSteps`, set via the toolbar zoom control / ⌘+/⌘- — see
+    /// `DetailStore.gridColumnCount`'s doc comment for why this is a small fixed set of prefixed
+    /// steps and never continuously computed from the container width.
+    let columnCount: Int
     /// "Sessions" mode (`false`): a click only selects — multi-select for rating/flagging/
     /// stacking/scene-assigning stays available, opening a photo needs the hover-revealed edit
     /// button or Return. "Edit" mode (`true`): a click selects *and* immediately opens the editor
@@ -46,14 +50,6 @@ struct CullingGridView: View {
     /// behavior only matters for keyboard navigation, which can move focus off-screen.
     @State private var scrollTarget: UUID?
     @Environment(ColorSchemeStore.self) private var uiColors
-    /// Fixed rather than computed from the container width via `GeometryReader` — that measuring
-    /// pass turned out to be the actual remaining cause of the large-library click/arrow-key lag
-    /// (confirmed by temporarily removing it entirely): `GeometryReader` forces a full second
-    /// layout pass of everything inside it — including the whole 1708-item `LazyVGrid` — roughly
-    /// 150-200ms after the first, on every single state change, regardless of whether the
-    /// container size actually changed. A fixed column count sidesteps that entirely at the cost
-    /// of not reflowing when the window resizes.
-    private let columnCount = 7
     @FocusState private var isFocused: Bool
 
     private let spacing: CGFloat = 12

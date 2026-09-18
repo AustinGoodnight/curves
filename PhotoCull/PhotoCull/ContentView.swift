@@ -152,6 +152,19 @@ struct ContentView: View {
             .keyboardShortcut("s", modifiers: .command)
             .hidden()
         }
+        .background {
+            // Mirrors `GridZoomControl`'s toolbar buttons — only meaningful against the session
+            // grid, so disabled while editing or in the culling view (both hide the grid, and
+            // `gridColumnCount` would have nothing visible to zoom).
+            Group {
+                Button("Zoom In") { detailStore.zoomInGrid() }
+                    .keyboardShortcut("+", modifiers: .command)
+                Button("Zoom Out") { detailStore.zoomOutGrid() }
+                    .keyboardShortcut("-", modifiers: .command)
+            }
+            .disabled(detailStore.editingAsset != nil || detailStore.isCullingViewActive)
+            .hidden()
+        }
         .alert("Import", isPresented: Binding(
             get: { importStatus != nil },
             set: { if !$0 { importStatus = nil } }
@@ -603,6 +616,12 @@ struct ContentView: View {
                 }
                 .toggleStyle(.button)
                 .help("Culling View — review and grade one photo at a time")
+            }
+            ToolbarItem(placement: .navigation) {
+                toolbarDivider
+            }
+            ToolbarItem(placement: .navigation) {
+                GridZoomControl(store: detailStore)
             }
             ToolbarItem(placement: .navigation) {
                 toolbarDivider
