@@ -57,7 +57,7 @@ final class DetailStore {
 
     /// Ordered from most zoomed-out (most, smallest columns) to most zoomed-in (fewest, largest
     /// columns) — `zoomInGrid`/`zoomOutGrid` step one entry at a time through this list.
-    static let gridColumnSteps = [13, 10, 8, 6, 5]
+    static let gridColumnSteps = [19, 16, 13, 10, 8, 6, 5, 4, 3]
 
     var canZoomInGrid: Bool {
         guard let index = Self.gridColumnSteps.firstIndex(of: gridColumnCount) else { return true }
