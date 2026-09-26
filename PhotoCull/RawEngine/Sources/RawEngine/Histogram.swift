@@ -109,7 +109,29 @@ public enum Histogram {
             gCounts[min(bins - 1, max(0, Int(g * Float(bins))))] += 1
             bCounts[min(bins - 1, max(0, Int(b * Float(bins))))] += 1
         }
-        return RGBHistogramData(r: normalized(rCounts), g: normalized(gCounts), b: normalized(bCounts))
+        return RGBHistogramData(
+            r: normalized(smoothed(rCounts)), g: normalized(smoothed(gCounts)), b: normalized(smoothed(bCounts))
+        )
+    }
+
+    /// A light 5-tap binomial blur (1-4-6-4-1) across neighboring bins. The preview being measured
+    /// is 8-bit and has been through tone curves, which stretch some ranges so certain levels
+    /// simply never occur — raw counts then alternate full/empty bins and the histogram reads as
+    /// a spiky comb that says nothing about the photo. Smoothing over ±2 bins removes that
+    /// quantization artifact while keeping real features (peaks, clipping spikes at the ends).
+    private static func smoothed(_ counts: [Float]) -> [Float] {
+        guard counts.count > 4 else { return counts }
+        let kernel: [Float] = [1, 4, 6, 4, 1]
+        return counts.indices.map { i in
+            var sum: Float = 0, weight: Float = 0
+            for (k, w) in kernel.enumerated() {
+                let j = i + k - 2
+                guard counts.indices.contains(j) else { continue }
+                sum += counts[j] * w
+                weight += w
+            }
+            return sum / weight
+        }
     }
 
     /// 2D density of pixel colors over hue (angle) × chroma (radius) — `hueBins` angular slices ×

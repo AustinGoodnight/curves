@@ -30,6 +30,8 @@ struct EditorSidebarView: View {
     /// Thumbnail renders for the Developer Mode "Film Simulation Styles" concepts — only ever
     /// populated while that panel is on screen.
     @State private var lutPreviewStore = LUTPreviewStore()
+    /// The Curve section's Presets panel (header button) — expanded or not.
+    @State private var isShowingCurvePresets = false
 
     /// Purely local UI state, not persisted: reopening the editor always starts closed, since
     /// "most of the time I leave it at default" was the whole reason for hiding these behind a
@@ -82,11 +84,8 @@ struct EditorSidebarView: View {
                 // (not deleted: `ColorDensityWheel.swift` is untouched, still a working, reusable
                 // component) so Histogram can take the full row width and grow, instead of the two
                 // splitting it.
-                VStack(alignment: .leading, spacing: 8) {
-                    sectionTitle("Histogram", enabled: nil)
-                    RGBHistogramView(data: coordinator.rgbHistogram, height: 240)
-                        .frame(maxWidth: .infinity)
-                }
+                // Histogram / Waveform / Vectorscope / Zones, one at a time — see `PhotoDataPanel`.
+                PhotoDataPanel(coordinator: coordinator)
                 // Exposure (native `CIRAWFilter` input, asset-level) and Contrast (a Color
                 // Balance RGB field, per-stage) sit together despite coming from different params —
                 // both are basic tone controls.
@@ -140,6 +139,29 @@ struct EditorSidebarView: View {
                         }
                         styleOption("C · Ramp Mapping") {
                             ContrastRampMapping(value: contrastBinding)
+                        }
+                    }
+                    devComparisonPanel("Curve Editor Styles") {
+                        Text("All six edit the real RGB curve below.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        styleOption("1 · Region Sliders") {
+                            CurveRegionSliders(points: curvePointsBinding, histogram: coordinator.luminanceHistogram)
+                        }
+                        styleOption("2 · Targeted Drag (hover a tone, drag up/down; double-click resets)") {
+                            CurveTargetedDrag(points: curvePointsBinding, histogram: coordinator.luminanceHistogram)
+                        }
+                        styleOption("3 · Zone Grid") {
+                            CurveZoneGrid(points: curvePointsBinding, histogram: coordinator.luminanceHistogram)
+                        }
+                        styleOption("4 · Ramp Preview") {
+                            CurveRampPreview(points: curvePointsBinding, histogram: coordinator.luminanceHistogram)
+                        }
+                        styleOption("5 · Refined Points") {
+                            CurveRefinedPoints(points: curvePointsBinding, histogram: coordinator.luminanceHistogram)
+                        }
+                        styleOption("6 · Presets + Amount") {
+                            CurvePresets(points: curvePointsBinding, histogram: coordinator.luminanceHistogram)
                         }
                     }
                     devComparisonPanel("Film Simulation Styles") {
@@ -349,27 +371,40 @@ struct EditorSidebarView: View {
                         }
                         HStack(spacing: 4) {
                             Spacer(minLength: 0)
+                            Button {
+                                withAnimation(.snappy(duration: 0.2)) { isShowingCurvePresets.toggle() }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Text("Presets").font(.caption)
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 8, weight: .semibold))
+                                        .rotationEffect(.degrees(isShowingCurvePresets ? 180 : 0))
+                                }
+                                .foregroundStyle(isShowingCurvePresets ? Color.primary : Color.secondary)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(
+                                    isShowingCurvePresets ? Color.white.opacity(0.12) : Color.clear,
+                                    in: Capsule()
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .help("Start from a common curve shape")
                             StoplightToggle(isOn: stageBoolBind(\.editRGBCurveEnabled))
                         }
                     }
-                    // No inner title/hint/reset row anymore (`showHeader: false`) — "Curve" above already
-                    // carries the title and the one reset button that actually matters (this module's full
-                    // reset, via `resetRGBCurve`); `CurveEditorControl`'s own built-in header only ever reset
-                    // the curve's points, a narrower, redundant second reset button sitting right below the
-                    // real one.
-                    CurveEditorHost(
-                        points: rgbCurvePoints(for: stage), height: rgbCurveHeight(for: width),
-                        histogram: coordinator.luminanceHistogram,
-                        showHeader: false,
-                        showEndpointControls: true,
-                        onPointsChange: { newPoints in
-                            let hadAdjustments = rgbCurveGate.hasAdjustments()
-                            stage.editRGBCurvePoints = newPoints.flatMap { [$0.x, $0.y] }
-                            syncModuleEnabled(rgbCurveGate, hadAdjustments: hadAdjustments)
-                            scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
-                        }
+                    if isShowingCurvePresets {
+                        CurvePresetChips(points: curvePointsBinding)
+                            .padding(10)
+                            .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                    // Targeted Drag (or Refined Points) on the Zone Grid, with the Ramp Preview under
+                    // it — see `CurveWorkbench`. Same write path as before via `curvePointsBinding`.
+                    CurveWorkbench(
+                        points: curvePointsBinding, histogram: coordinator.luminanceHistogram,
+                        height: rgbCurveHeight(for: width)
                     )
-                    .equatable()
                     // A precise numeric nudge, separate from dragging the graph's own bottom-left
                     // endpoint — small range ("slightly") since this is meant for a fine trim, not
                     // a replacement for Filmic's much wider Black EV control.
@@ -526,6 +561,20 @@ struct EditorSidebarView: View {
                 .foregroundStyle(.tertiary)
             content()
         }
+    }
+
+    /// The RGB curve's points — used by `CurveWorkbench`, the Presets panel, and the Developer Mode
+    /// curve concepts (flatten, keep the module switch synced, render).
+    private var curvePointsBinding: Binding<[SIMD2<Double>]> {
+        Binding(
+            get: { rgbCurvePoints(for: stage) },
+            set: { newPoints in
+                let hadAdjustments = rgbCurveGate.hasAdjustments()
+                stage.editRGBCurvePoints = newPoints.flatMap { [$0.x, $0.y] }
+                syncModuleEnabled(rgbCurveGate, hadAdjustments: hadAdjustments)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+            }
+        )
     }
 
     private var lutActions: LUTConceptActions {

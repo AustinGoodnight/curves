@@ -22,6 +22,9 @@ final class EditorRenderCoordinator {
     private(set) var colorDensity: [Float] = []
     /// Clipping fractions and mean color of the current render — see `ImageToneStats`.
     private(set) var toneStats = ImageToneStats()
+    /// Rendered scope images for `PhotoDataPanel`'s Waveform/Vectorscope tabs — see `PhotoScopes`.
+    private(set) var waveformImage: CGImage?
+    private(set) var vectorscopeImage: CGImage?
     private(set) var isReady = false
 
     /// Called with a freshly-rendered, non-draft preview whenever one finishes — `EditorView` uses
@@ -184,9 +187,14 @@ final class EditorRenderCoordinator {
             // the one place in the editor a histogram is the main attraction, not a curve-graph
             // backdrop) — `maxSamples` scaled up to match so each of the extra bins still gets a
             // reasonable sample count instead of getting noisier for the same total budget.
-            let rgb = Histogram.rgbChannels(from: image, bins: 192, maxSamples: 120_000)
+            // 128 bins, not an arbitrary count — it divides the 256 levels of the 8-bit preview
+            // evenly (2 levels per bin); an uneven ratio (e.g. 192) gives some bins 2 levels and
+            // their neighbors 1, which draws as alternating tall/short spikes.
+            let rgb = Histogram.rgbChannels(from: image, bins: 128, maxSamples: 120_000)
             let density = Histogram.colorDensity(from: image)
             let stats = Histogram.toneStats(from: image)
+            let waveform = PhotoScopes.waveform(from: image)
+            let vectorscope = PhotoScopes.vectorscope(from: image)
             await MainActor.run { [weak self] in
                 guard let self, generation == self.histogramGeneration else { return }
                 self.luminanceHistogram = luminance
@@ -194,6 +202,8 @@ final class EditorRenderCoordinator {
                 self.rgbHistogram = rgb
                 self.colorDensity = density
                 self.toneStats = stats
+                self.waveformImage = waveform
+                self.vectorscopeImage = vectorscope
             }
         }
     }
