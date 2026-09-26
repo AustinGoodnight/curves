@@ -230,7 +230,7 @@ public final class Stage {
     /// bypassed without discarding it, matching every other module's bypass switch).
     /// `false` by default/whenever no LUT is loaded, same auto-managed convention as
     /// `editFilmicEnabled` above — flips `true` the moment a LUT is loaded (see
-    /// `ColorBalanceBarView.applyLUT3DPreset`/`importLUT3DPreset`).
+    /// `ColorBalanceBarView.applyLUT(_:)`).
     public var editLUT3DEnabled: Bool = false
     /// Raw RGBA float32 bytes, red-fastest order — see `LUT3D.data`'s doc comment for the exact
     /// layout. Stored pre-parsed so the original `.cube` file never needs to be re-read.

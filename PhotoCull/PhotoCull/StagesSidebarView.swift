@@ -57,13 +57,18 @@ struct StagesSidebarView: View {
 
     /// What "Save Preset…" is about to capture — a single stage (right-click on a row) or the
     /// whole active stack flattened into one (the bottom "Save All Stages as Preset…" button). Both
-    /// funnel through the same name-prompt alert and `savePreset()`.
-    private enum PresetSaveSource {
-        case stage(Stage)
-        case allActiveStages
+    /// funnel through the same `SavePresetSheet` and `savePreset(_:options:)`. `Identifiable` only so
+    /// it can drive `.sheet(item:)`.
+    private struct PresetSaveRequest: Identifiable {
+        enum Source {
+            case stage(Stage)
+            case allActiveStages
+        }
+        let id = UUID()
+        let source: Source
+        let defaultName: String
     }
-    @State private var presetSaveSource: PresetSaveSource?
-    @State private var newPresetName = ""
+    @State private var presetSaveRequest: PresetSaveRequest?
 
     @State private var isSavingVersion = false
     @State private var newVersionName = ""
@@ -142,8 +147,7 @@ struct StagesSidebarView: View {
             }
             .padding(.vertical, 2)
             Button {
-                presetSaveSource = .allActiveStages
-                newPresetName = "Preset"
+                presetSaveRequest = PresetSaveRequest(source: .allActiveStages, defaultName: "Preset")
             } label: {
                 Label("Save All Stages as Preset…", systemImage: "square.stack.3d.up")
             }
@@ -220,13 +224,16 @@ struct StagesSidebarView: View {
                 }
             }
         }
-        .alert("Save Preset", isPresented: Binding(
-            get: { presetSaveSource != nil },
-            set: { if !$0 { presetSaveSource = nil } }
-        )) {
-            TextField("Preset Name", text: $newPresetName)
-            Button("Cancel", role: .cancel) { presetSaveSource = nil }
-            Button("Save") { savePreset() }
+        .sheet(item: $presetSaveRequest) { request in
+            SavePresetSheet(
+                sessionName: asset.session?.name,
+                name: request.defaultName,
+                onSave: { options in
+                    presetSaveRequest = nil
+                    savePreset(request.source, options: options)
+                },
+                onCancel: { presetSaveRequest = nil }
+            )
         }
         .alert("Save Version", isPresented: $isSavingVersion) {
             TextField("Version Name", text: $newVersionName)
@@ -302,7 +309,7 @@ struct StagesSidebarView: View {
             }
         }
         Section("Presets") {
-            PresetBrowserView(onApply: applyPreset)
+            PresetBrowserView(sessionID: asset.session?.id, onApply: applyPreset)
         }
         Section("Copy from Recent") {
             RecentEditsBrowserView(currentAssetID: asset.id, onApply: applyRecentEdits)
@@ -548,19 +555,16 @@ struct StagesSidebarView: View {
     }
 
     private func beginSavePreset(_ stage: Stage) {
-        presetSaveSource = .stage(stage)
-        newPresetName = stage.name
+        presetSaveRequest = PresetSaveRequest(source: .stage(stage), defaultName: stage.name)
     }
 
-    /// Encodes whatever `presetSaveSource` pointed at (one stage's own values, or the whole active
-    /// stack flattened — see `StageFieldSnapshot.init(mergingActiveStages:)`) into a new `Preset`.
-    /// Silently does nothing on an empty name or an encoding failure (every snapshot field is a
-    /// plain Double?/Bool/Data?/[Double]?/String?, so encoding can't actually fail in practice).
-    private func savePreset() {
-        guard let source = presetSaveSource else { return }
-        presetSaveSource = nil
-        let trimmed = newPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+    /// Encodes `source` (one stage's own values, or the whole active stack flattened — see
+    /// `StageFieldSnapshot.init(mergingActiveStages:)`) into a new `Preset`, along with this photo's
+    /// exposure (always) and white balance (if `options` asks) — see `Preset.captureAssetFields`.
+    /// "Keep Within Session" scopes it to `asset.session`. Silently does nothing on an encoding
+    /// failure (every snapshot field is a plain Double?/Bool/Data?/[Double]?/String?, so encoding
+    /// can't actually fail in practice).
+    private func savePreset(_ source: PresetSaveRequest.Source, options: SavePresetSheet.Options) {
         let snapshot: StageFieldSnapshot
         switch source {
         case .stage(let stage):
@@ -569,7 +573,14 @@ struct StagesSidebarView: View {
             snapshot = StageFieldSnapshot(mergingActiveStages: activeStages)
         }
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
-        modelContext.insert(Preset(name: trimmed, snapshotData: data))
+        let preset = Preset(name: options.name, snapshotData: data)
+        preset.captureAssetFields(from: asset, includeWhiteBalance: options.includeWhiteBalance)
+        if options.keepWithinSession, let session = asset.session {
+            preset.sessionID = session.id
+            preset.sessionName = session.name
+        }
+        modelContext.insert(preset)
+        PresetBackup.write(context: modelContext)
     }
 
     /// Saves `stage`'s own values as *the* default stage — every newly-imported photo's `.single`
@@ -587,13 +598,17 @@ struct StagesSidebarView: View {
         let snapshot = StageFieldSnapshot(capturing: stage)
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         let preset = Preset(name: "Default Stage", snapshotData: data)
+        preset.captureAssetFields(from: asset, includeWhiteBalance: false)
         preset.isDefault = true
         modelContext.insert(preset)
+        PresetBackup.write(context: modelContext)
     }
 
     /// Loads a saved preset onto this photo as a new **custom stage** — never a scene; see
     /// `Preset`'s doc comment. Same blank-slate/stack-ownership rules as `addCustomStage()`, just
-    /// pre-populated from the preset's snapshot instead of starting empty.
+    /// pre-populated from the preset's snapshot instead of starting empty. The preset's exposure
+    /// (and white balance, if it saved one) go straight onto `asset` itself, since those aren't
+    /// per-stage — deleting the new stage later won't undo them.
     private func applyPreset(_ preset: Preset) {
         guard let snapshot = try? JSONDecoder().decode(StageFieldSnapshot.self, from: preset.snapshotData) else { return }
         let nextIndex = (asset.customStages.map(\.sortIndex).max() ?? -1) + 1
@@ -604,6 +619,7 @@ struct StagesSidebarView: View {
             stage = Stage(kind: .custom, name: preset.name, asset: asset, sortIndex: nextIndex)
         }
         snapshot.apply(to: stage)
+        preset.applyAssetFields(to: asset)
         modelContext.insert(stage)
         selectedStage = stage
         refreshAndRender()

@@ -39,7 +39,7 @@ final class DetailStore {
     var ratingFilter: Int = 0
     var flagFilter: FlagState?
     var fileTypeFilter: FileTypeFilter = .all
-    var sortOption: SortOption = .captureDateDesc
+    var sortOption: SortOption = .captureDateAsc
     var refreshTrigger = 0
     /// Which stacks are shown expanded (all members visible) vs collapsed (one cover cell) — used
     /// only by `rebuildDisplayItems()`. Not local `@State` on `CullingGridView` — it needs to live
@@ -115,9 +115,8 @@ final class DetailStore {
     }
 
     /// The rating/flag/file-type filters, independent of the scene/session scoping
-    /// `refreshFilteredAssets` also applies — shared with `SessionFilmstripView`, which is scoped to
-    /// the open photo's session rather than the active scene/session selection but should still
-    /// respect the same rating/flag/file-type filters as the grid.
+    /// `refreshFilteredAssets` also applies — also used by `rebuildFilmstripItems`'s fallback for a
+    /// photo opened from outside the grid's current scope.
     func passesActiveFilters(_ asset: PhotoAsset) -> Bool {
         if ratingFilter > 0, asset.rating < ratingFilter { return false }
         if let flagFilter, asset.flag != flagFilter { return false }
@@ -140,22 +139,94 @@ final class DetailStore {
         } else if let selectedSession {
             result = result.filter { $0.session?.id == selectedSession.id }
         }
+        filterScopeSceneID = selectedScene?.id
+        filterScopeSessionID = selectedScene == nil ? selectedSession?.id : nil
         result = result.filter { passesActiveFilters($0) }
-        switch sortOption {
-        case .captureDateDesc:
-            result.sort { ($0.captureDate ?? $0.importDate) > ($1.captureDate ?? $1.importDate) }
-        case .captureDateAsc:
-            result.sort { ($0.captureDate ?? $0.importDate) < ($1.captureDate ?? $1.importDate) }
-        case .ratingDesc:
-            result.sort { $0.rating > $1.rating }
-        case .fileName:
-            result.sort { $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending }
-        }
+        result.sort(by: sortsBefore)
         filteredAssets = result
         rebuildDisplayItems()
+        rebuildFilmstripItems()
+    }
+
+    /// The active `sortOption`'s ordering — shared by `refreshFilteredAssets` and
+    /// `rebuildFilmstripItems` (which needs it to slot the open photo back in when the active
+    /// filters exclude it).
+    func sortsBefore(_ a: PhotoAsset, _ b: PhotoAsset) -> Bool {
+        switch sortOption {
+        case .captureDateDesc:
+            return (a.captureDate ?? a.importDate) > (b.captureDate ?? b.importDate)
+        case .captureDateAsc:
+            return (a.captureDate ?? a.importDate) < (b.captureDate ?? b.importDate)
+        case .ratingDesc:
+            return a.rating > b.rating
+        case .fileName:
+            return a.fileName.localizedStandardCompare(b.fileName) == .orderedAscending
+        }
     }
 
     var filteredAssets: [PhotoAsset] = []
+
+    /// The sidebar scope `filteredAssets` was last built for — at most one is non-nil (a scene
+    /// selection takes priority, same as in `refreshFilteredAssets`). Lets `rebuildFilmstripItems`
+    /// tell whether the open photo actually belongs to the grid's current scope.
+    private var filterScopeSceneID: UUID?
+    private var filterScopeSessionID: UUID?
+
+    /// `SessionFilmstripView`'s render list — cached here, not computed in its `body`, for the same
+    /// Observation-dependency reason as `displayItems` (building it walks `.stack`/`.photos` on
+    /// every listed asset). Rebuilt from `refreshFilteredAssets` and from `ContentView`'s
+    /// `.onChange(of: editingAsset)`.
+    var filmstripItems: [FilmstripItem] = []
+
+    /// Mirrors the grid exactly — same scene/session scope, rating/flag/file-type filters, and sort
+    /// — so whatever the user narrowed the grid down to carries straight into the editor and back,
+    /// without redoing it. Falls back to the open photo's own session (still filtered) only when
+    /// that photo lies outside the grid's scope entirely (e.g. opened from Recent Edits), where the
+    /// grid's list would be a list of unrelated photos. The open photo is always kept, even if a
+    /// filter changed while editing now excludes it — losing the photo you're actively editing out
+    /// of its own filmstrip would be more surprising than useful.
+    func rebuildFilmstripItems() {
+        guard let asset = editingAsset else {
+            filmstripItems = []
+            return
+        }
+        let inGridScope: Bool
+        if let filterScopeSceneID {
+            inGridScope = asset.scene?.id == filterScopeSceneID
+        } else if let filterScopeSessionID {
+            inGridScope = asset.session?.id == filterScopeSessionID
+        } else {
+            inGridScope = true
+        }
+        var list: [PhotoAsset]
+        if inGridScope {
+            list = filteredAssets
+        } else if let session = asset.session {
+            list = (session.photos ?? []).filter { passesActiveFilters($0) }.sorted(by: sortsBefore)
+        } else {
+            list = []
+        }
+        if !list.contains(where: { $0.id == asset.id }) {
+            let index = list.firstIndex { sortsBefore(asset, $0) } ?? list.endIndex
+            list.insert(asset, at: index)
+        }
+
+        let visibleIDs = Set(list.map(\.id))
+        var seenStacks = Set<UUID>()
+        var result: [FilmstripItem] = []
+        for photo in list {
+            guard let stack = photo.stack else {
+                result.append(FilmstripItem(photo: photo, stackCount: 1))
+                continue
+            }
+            guard !seenStacks.contains(stack.id) else { continue }
+            seenStacks.insert(stack.id)
+            let members = (stack.photos ?? []).filter { visibleIDs.contains($0.id) }
+            let containsCurrent = members.contains { $0.id == asset.id }
+            result.append(FilmstripItem(photo: containsCurrent ? asset : photo, stackCount: members.count))
+        }
+        filmstripItems = result
+    }
 
     /// The grid's actual render list — one entry per visible cell (a single photo, a collapsed
     /// stack cover, or one expanded stack member). Built here, in an ordinary (non-`View`,
@@ -203,6 +274,16 @@ final class DetailStore {
         }
         rebuildDisplayItems()
     }
+}
+
+/// One entry per *shot* in `SessionFilmstripView`, not per photo — a stack collapses to a single
+/// thumbnail (with a count badge), same as the main grid's stack cover. The representative for the
+/// stack the open photo belongs to is that photo itself; for any other stack it's the first member
+/// in the list's order.
+struct FilmstripItem: Identifiable {
+    let photo: PhotoAsset
+    let stackCount: Int
+    var id: UUID { photo.id }
 }
 
 enum DisplayItem: Identifiable {

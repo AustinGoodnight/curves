@@ -44,7 +44,6 @@ struct ColorBalanceBarView: View {
     let history: EditHistory
     let wheelDiameter: CGFloat
 
-    @Environment(\.modelContext) private var modelContext
     @Environment(ColorSchemeStore.self) private var uiColors
 
     /// Set in Settings (`SettingsView`) — whether the WB group below renders as the classic
@@ -54,7 +53,7 @@ struct ColorBalanceBarView: View {
     /// Which of the 3 color-zones curves is currently shown in the EQ graph. 2 (hue) matches
     /// darktable's own default "select by" channel.
     @State private var colorZonesChannel = 2
-    /// Set when `LUT3DLoader` throws while importing a `.cube` file, surfaced via `.alert`; `nil`
+    /// Set when `LUT3DLoader` throws while loading a `.cube` file from the LUT folder, surfaced via `.alert`; `nil`
     /// means no error is showing.
     @State private var lut3DImportError: String?
 
@@ -697,8 +696,7 @@ struct ColorBalanceBarView: View {
                     .foregroundStyle(.secondary)
                 LUT3DPresetMenu(
                     currentTitle: stage.lut3DTitle,
-                    onSelect: { preset in applyLUT3DPreset(preset) },
-                    onImport: { url in importLUT3DPreset(from: url) }
+                    onSelect: { entry in applyLUT(entry) }
                 )
                 if stage.lut3DData != nil {
                     // A knob instead of `slider(...)`'s usual horizontal bar — an experiment,
@@ -729,30 +727,17 @@ struct ColorBalanceBarView: View {
         }
     }
 
-    /// Applies a library preset to `stage` — copies its data/size/name into the stage's own
-    /// fields (see `LUT3DPreset`'s doc comment for why this is a copy, not a relationship).
-    private func applyLUT3DPreset(_ preset: LUT3DPreset) {
-        stage.lut3DData = preset.data
-        stage.lut3DSize = preset.size
-        stage.lut3DTitle = preset.name
-        stage.editLUT3DEnabled = true
-        scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
-    }
-
-    /// Parses `url` as a `.cube` file, adds it to the shared library so it shows up in
-    /// `LUT3DPresetMenu` for every stage from now on, and applies it to `stage` immediately. `url`
-    /// comes from `.fileImporter`, which hands back a security-scoped URL — must bracket the read
-    /// with start/stopAccessingSecurityScopedResource or `LUT3DLoader.load` fails to read the
-    /// file's contents.
-    private func importLUT3DPreset(from url: URL) {
-        let didAccess = url.startAccessingSecurityScopedResource()
-        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+    /// Parses `entry`'s `.cube` file and copies the result onto `stage`'s own fields — a copy, not
+    /// a reference to the file, so the stage keeps rendering the same look even if the file is
+    /// later edited, moved, or deleted from the LUT folder (see `LUTLibrary`'s doc comment).
+    private func applyLUT(_ entry: LUTLibraryEntry) {
         do {
-            let lut = try LUT3DLoader.load(contentsOf: url)
-            let name = (lut.title?.isEmpty == false ? lut.title : nil) ?? url.deletingPathExtension().lastPathComponent
-            let preset = LUT3DPreset(name: name, size: lut.size, data: lut.data)
-            modelContext.insert(preset)
-            applyLUT3DPreset(preset)
+            let lut = try LUT3DLoader.load(contentsOf: entry.url)
+            stage.lut3DData = lut.data
+            stage.lut3DSize = lut.size
+            stage.lut3DTitle = entry.name
+            stage.editLUT3DEnabled = true
+            scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
         } catch {
             lut3DImportError = "\(error)"
         }

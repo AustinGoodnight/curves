@@ -120,9 +120,10 @@ private struct FilmstripThumbnail: View {
     }
 }
 
-/// Vertical filmstrip of every photo in the current asset's session — lets you jump between photos
-/// without leaving the editor. A distinct panel from `StagesSidebarView`'s "Stack" section: this
-/// one is about *which* photo is open; that one is about a single photo's own edit stack.
+/// Vertical filmstrip of the same photos the grid was showing (scene/session scope, filters, and
+/// sort all carried over) — lets you jump between photos without leaving the editor. A distinct
+/// panel from `StagesSidebarView`'s "Stack" section: this one is about *which* photo is open; that
+/// one is about a single photo's own edit stack.
 ///
 /// `ContentView` constructs this as a sibling of `EditorView`, not as a child of it, specifically so
 /// this view's own identity — and its `ScrollView`'s scroll position — survives switching photos.
@@ -134,56 +135,14 @@ private struct FilmstripThumbnail: View {
 /// top on every single click.
 struct SessionFilmstripView: View {
     let asset: PhotoAsset
-    /// Read only for `passesActiveFilters` in `filmstripItems` — the culling view's rating/flag/
-    /// file-type filters, which should also thin out this session-scoped list rather than only
-    /// applying to the grid. A plain `let` (not `@Bindable`) since nothing here writes to it; as its
-    /// own `View` type, reading `store`'s properties still scopes Observation invalidation to just
-    /// this view, not `ContentView`'s.
+    /// Read only for `filmstripItems` — the grid's own scope/filters/sort, precomputed in
+    /// `DetailStore.rebuildFilmstripItems`, so the filmstrip always matches what the grid showed.
+    /// A plain `let` (not `@Bindable`) since nothing here writes to it; as its own `View` type,
+    /// reading `store`'s properties still scopes Observation invalidation to just this view, not
+    /// `ContentView`'s.
     let store: DetailStore
     var onSelectAsset: (PhotoAsset) -> Void
     @Environment(ColorSchemeStore.self) private var uiColors
-
-    /// One entry per *shot*, not per photo — a stack collapses to a single thumbnail here (with a
-    /// count badge, see `FilmstripThumbnail.stackBadge`), same as the main grid's stack cover, since
-    /// this panel is about picking which shot to look at. `StagesSidebarView`'s "Stack" section is
-    /// where you pick a specific take within one. The representative for a stack the currently-open
-    /// photo belongs to is `asset` itself (so the filmstrip shows the actual open photo, not always
-    /// the stack's earliest member); for any other stack it's just the earliest member. Reads
-    /// `asset.session?.photos` — a relationship on the one already-in-memory asset being edited,
-    /// bounded to that session's size, not a library-wide `@Query` scan. Not the trap `CLAUDE.md`
-    /// warns about (that's specifically about `ContentView`'s `@Query var allAssets`).
-    private struct Item: Identifiable {
-        let photo: PhotoAsset
-        let stackCount: Int
-        var id: UUID { photo.id }
-    }
-
-    /// The currently-open `asset` is always kept, even if it no longer passes the active filters
-    /// (e.g. the user changes the file-type filter while a non-matching photo is open) — losing the
-    /// photo you're actively editing out of its own filmstrip would be more surprising than useful.
-    private var filmstripItems: [Item] {
-        guard let session = asset.session else { return [Item(photo: asset, stackCount: 1)] }
-        let visibleIDs = Set((session.photos ?? [])
-            .filter { store.passesActiveFilters($0) || $0.id == asset.id }
-            .map(\.id))
-        let sorted = (session.photos ?? [])
-            .filter { visibleIDs.contains($0.id) }
-            .sorted { ($0.captureDate ?? $0.importDate) < ($1.captureDate ?? $1.importDate) }
-        var seenStacks = Set<UUID>()
-        var result: [Item] = []
-        for photo in sorted {
-            guard let stack = photo.stack else {
-                result.append(Item(photo: photo, stackCount: 1))
-                continue
-            }
-            guard !seenStacks.contains(stack.id) else { continue }
-            seenStacks.insert(stack.id)
-            let members = (stack.photos ?? []).filter { visibleIDs.contains($0.id) }
-            let containsCurrent = members.contains { $0.id == asset.id }
-            result.append(Item(photo: containsCurrent ? asset : photo, stackCount: members.count))
-        }
-        return result
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -195,7 +154,7 @@ struct SessionFilmstripView: View {
                 .padding(.vertical, 10)
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(filmstripItems) { item in
+                    ForEach(store.filmstripItems) { item in
                         FilmstripThumbnail(asset: item.photo, isCurrent: item.photo.id == asset.id, stackCount: item.stackCount)
                             .id(item.photo.id)
                             .onTapGesture { onSelectAsset(item.photo) }

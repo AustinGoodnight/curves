@@ -74,6 +74,7 @@ struct ContentView: View {
             .onChange(of: detailStore.selection) { _, _ in detailStore.refreshSelectionDerivedState(allAssets: allAssets, scenes: scenes) }
             .onChange(of: detailStore.editingAsset) { _, newValue in
                 detailStore.refreshSelectionDerivedState(allAssets: allAssets, scenes: scenes)
+                detailStore.rebuildFilmstripItems()
                 updateSidebarVisibility()
                 // Keeps the toolbar's Sessions/Edit switcher truthful when the editor opens or
                 // closes through any path *other* than clicking that switcher itself — the
@@ -714,7 +715,7 @@ struct ContentView: View {
                     asset.colorLabelRaw = sidecar.colorLabelRaw
                     sidecar.singleStage.apply(to: asset.singleStage)
                 } else {
-                    StageFieldSnapshot.applyDefaultIfAvailable(to: asset.singleStage, context: modelContext)
+                    StageFieldSnapshot.applyDefaultIfAvailable(to: asset, context: modelContext)
                     persistSidecars(for: asset)
                 }
             }

@@ -42,14 +42,18 @@ struct PhotoCullApp: App {
     /// here and shared with the whole app via `.environment(_:)` below, rather than per-window,
     /// so every window/scene reads the same live values.
     @State private var colorSchemeStore = ColorSchemeStore()
+    /// The LUT folder's contents (Settings > LUTs) — shared the same way, since both the editor's
+    /// picker and the Settings window read it.
+    @State private var lutLibrary = LUTLibrary()
     let sharedModelContainer: ModelContainer = {
         let schema = Schema([
             PhotoAsset.self, PhotoStack.self, PhotoScene.self, Session.self, Stage.self, LUT3DPreset.self, AssetVersion.self,
-            Preset.self, ExportPreset.self
+            Preset.self, PresetFolder.self, ExportPreset.self
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        let container: ModelContainer
         do {
-            return try ModelContainer(for: schema, configurations: [config])
+            container = try ModelContainer(for: schema, configurations: [config])
         } catch {
             // No SchemaMigrationPlan is wired up, so an in-development `@Model` change SwiftData
             // can't auto-migrate throws here. Crashing used to be the only way to see this, and
@@ -68,11 +72,17 @@ struct PhotoCullApp: App {
                 MainActor.assumeIsolated {
                     CacheRebuilder.rebuild(context: ModelContext(freshContainer))
                 }
-                return freshContainer
+                container = freshContainer
             } catch {
                 fatalError("Could not create ModelContainer even after backing up the incompatible store: \(error)")
             }
         }
+        // Presets have no sidecar files to rebuild from, so a reset store gets them back from
+        // their own JSON backup instead — see `PresetBackup`.
+        MainActor.assumeIsolated {
+            PresetBackup.syncAtLaunch(context: container.mainContext)
+        }
+        return container
     }()
 
     /// Renames the SQLite store (plus its `-shm`/`-wal` siblings) to a timestamped backup next to
@@ -101,6 +111,7 @@ struct PhotoCullApp: App {
                 // mismatch the rest of the app on a light-mode Mac.
                 .preferredColorScheme(.dark)
                 .environment(colorSchemeStore)
+                .environment(lutLibrary)
                 .tint(colorSchemeStore.accentColor)
         }
         .modelContainer(sharedModelContainer)
@@ -109,6 +120,10 @@ struct PhotoCullApp: App {
         Settings {
             SettingsView()
                 .environment(colorSchemeStore)
+                .environment(lutLibrary)
         }
+        // The Settings window's "Presets" pane (`PresetManagerView`) reads/writes `Preset`s, so it
+        // needs the same container as the main window.
+        .modelContainer(sharedModelContainer)
     }
 }
