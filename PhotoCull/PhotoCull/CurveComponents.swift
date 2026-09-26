@@ -14,13 +14,22 @@ let curveMaxPoints = RGBCurveKernel.maxNodes
 
 func clampUnit(_ v: Double) -> Double { min(max(v, 0), 1) }
 
-/// Sorted, endpoint-pinned copy of `points` (x of first/last forced to 0/1).
+/// Sorted copy of `points`. Endpoints are *not* forced to x = 0/1: an endpoint moved in along
+/// the bottom/top edge (`CurveEdgeHandles`) is a valid input black/white point — both the spline
+/// and `RGBCurveKernel` clamp input to the node range, so tones outside it render flat at the
+/// endpoint's level.
 func normalizedCurve(_ points: [SIMD2<Double>]) -> [SIMD2<Double>] {
-    var sorted = points.sorted { $0.x < $1.x }
+    let sorted = points.sorted { $0.x < $1.x }
     guard sorted.count >= 2 else { return RGBCurveParameters.identityPoints }
-    sorted[0].x = 0
-    sorted[sorted.count - 1].x = 1
     return sorted
+}
+
+/// The x range a new interior point may be placed in — strictly between the endpoints, which may
+/// themselves have moved in from 0/1.
+func interiorRange(_ current: [SIMD2<Double>], margin: Double = 0.02) -> ClosedRange<Double> {
+    let lower = (current.first?.x ?? 0) + margin
+    let upper = (current.last?.x ?? 1) - margin
+    return lower <= upper ? lower...upper : lower...lower
 }
 
 func curveSpline(_ points: [SIMD2<Double>]) -> RGBCurveSpline {
@@ -122,6 +131,9 @@ struct CurveBackdrop: View {
             }
             context.stroke(line, with: .color(lineColor), style: StrokeStyle(lineWidth: 2, lineCap: .round))
         }
+        // Same 8pt rounded corners as every other recessed panel — clips the histogram, grid and
+        // curve too, not just the fill.
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -161,6 +173,8 @@ struct PointCurveEditor: View {
     /// Readout text formatter (input, output) → label; defaults to 0–100 values.
     var readout: ((Double, Double) -> String)? = nil
     var focusX: Binding<Double?>? = nil
+    /// `false` when `CurveEdgeHandles` owns the endpoints (drawn and dragged there instead).
+    var editsEndpoints = true
     @Environment(ColorSchemeStore.self) private var uiColors
 
     @State private var dragIndex: Int?
@@ -174,7 +188,7 @@ struct PointCurveEditor: View {
             ZStack(alignment: .topLeading) {
                 CurveBackdrop(points: current, histogram: histogram, lineColor: uiColors.accentColor, grid: grid)
                 if !pointsOnlyOnHover || hover != nil || dragIndex != nil {
-                    ForEach(current.indices, id: \.self) { i in
+                    ForEach(editsEndpoints ? Array(current.indices) : Array(current.indices.dropFirst().dropLast()), id: \.self) { i in
                         let p = current[i]
                         Circle()
                             .fill(dragIndex == i ? uiColors.accentColor : .white)
@@ -217,6 +231,7 @@ struct PointCurveEditor: View {
     private func nearestIndex(to location: CGPoint, in current: [SIMD2<Double>], size: CGSize) -> Int? {
         var best: (Int, CGFloat)?
         for (i, p) in current.enumerated() {
+            if !editsEndpoints, i == 0 || i == current.count - 1 { continue }
             let d = hypot(size.width * p.x - location.x, size.height * (1 - p.y) - location.y)
             if d <= hitRadius, d < (best?.1 ?? .infinity) { best = (i, d) }
         }
@@ -232,7 +247,8 @@ struct PointCurveEditor: View {
                         dragIndex = hit
                     } else if current.count < curveMaxPoints {
                         let rawX = clampUnit(drag.startLocation.x / size.width)
-                        let x = min(max(snapX?(rawX) ?? rawX, 0.01), 0.99)
+                        let range = interiorRange(current, margin: 0.01)
+                        let x = min(max(snapX?(rawX) ?? rawX, range.lowerBound), range.upperBound)
                         guard !current.contains(where: { abs($0.x - x) < 0.01 }) else { return }
                         let y = clampUnit(curveSpline(current).evaluate(x))
                         current.append(SIMD2(x, y))
@@ -248,7 +264,7 @@ struct PointCurveEditor: View {
                 let fine = NSEvent.modifierFlags.contains(.shift) ? 0.25 : 1
                 var x = start.x + Double(drag.translation.width / size.width) * fine
                 var y = clampUnit(start.y - Double(drag.translation.height / size.height) * fine)
-                if index == 0 { x = 0 } else if index == current.count - 1 { x = 1 } else {
+                if index == 0 { x = start.x } else if index == current.count - 1 { x = start.x } else {
                     let lower = current[index - 1].x + 0.01, upper = current[index + 1].x - 0.01
                     x = min(max(snapX?(x) ?? x, lower), upper)
                 }
@@ -316,7 +332,8 @@ struct TargetedCurveGraph: View {
                 var current = normalizedCurve(points)
                 if dragIndex == nil {
                     guard abs(drag.translation.height) > 2 else { return }
-                    let x = min(max(clampUnit(drag.startLocation.x / size.width), 0.02), 0.98)
+                    let range = interiorRange(current)
+                    let x = min(max(clampUnit(drag.startLocation.x / size.width), range.lowerBound), range.upperBound)
                     if let near = current.indices.dropFirst().dropLast().min(by: { abs(current[$0].x - x) < abs(current[$1].x - x) }),
                        abs(current[near].x - x) < 0.06 {
                         dragIndex = near
@@ -338,6 +355,106 @@ struct TargetedCurveGraph: View {
             })
         }
         .frame(height: height)
+    }
+}
+
+// MARK: - Edge handles
+
+/// The curve's two endpoints as handles that travel along the graph's edges — the black point on
+/// the L of the bottom + left edges, the white point on the L of the top + right edges:
+/// - black along the **bottom** edge → input black point (tones below it crush to black);
+/// - black up the **left** edge → output black level (lifted / faded shadows);
+/// - white along the **top** edge → input white point (tones above it clip to white);
+/// - white down the **right** edge → output white level (muted highlights).
+/// A drag is projected onto whichever leg of the L it's nearer, so rounding the corner is one
+/// continuous motion. Overlaid on top of the graph so these win over the graph's own gestures.
+struct CurveEdgeHandles: View {
+    @Binding var points: [SIMD2<Double>]
+    @Environment(ColorSchemeStore.self) private var uiColors
+    @State private var active: Int?
+
+    var body: some View {
+        GeometryReader { geo in
+            let size = geo.size
+            let current = normalizedCurve(points)
+            ZStack(alignment: .topLeading) {
+                handle(index: 0, current: current, size: size, fill: .black, stroke: .white)
+                handle(index: current.count - 1, current: current, size: size, fill: .white, stroke: .black.opacity(0.6))
+                if let active, current.indices.contains(active) {
+                    let p = current[active]
+                    Text(label(for: p, isBlack: active == 0))
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(.black.opacity(0.7), in: Capsule())
+                        .fixedSize()
+                        .position(
+                            x: min(max(size.width * p.x, 44), size.width - 44),
+                            y: active == 0 ? size.height * (1 - p.y) - 18 : size.height * (1 - p.y) + 18
+                        )
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+    }
+
+    private func handle(index: Int, current: [SIMD2<Double>], size: CGSize, fill: Color, stroke: Color) -> some View {
+        let p = current[index]
+        let isActive = active == index
+        return RoundedRectangle(cornerRadius: 2.5)
+            .fill(fill)
+            .overlay(RoundedRectangle(cornerRadius: 2.5).strokeBorder(stroke, lineWidth: 1.5))
+            .frame(width: isActive ? 13 : 11, height: isActive ? 13 : 11)
+            .shadow(color: .black.opacity(0.5), radius: 1.5, y: 1)
+            .frame(width: 26, height: 26)
+            .contentShape(Rectangle())
+            // Gestures before `.position` — attached after it, the gesture's hit area would be the
+            // whole graph (`.position` fills its parent), swallowing every drag meant for the curve.
+            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local).onChanged { drag in
+                active = index
+                var current = normalizedCurve(points)
+                guard current.indices.contains(index) else { return }
+                let fine = NSEvent.modifierFlags.contains(.shift) ? 0.25 : 1
+                let base = current[index]
+                let dx = Double(drag.translation.width / size.width) * fine
+                let dy = -Double(drag.translation.height / size.height) * fine
+                let startX = dragOrigin?.x ?? base.x, startY = dragOrigin?.y ?? base.y
+                if dragOrigin == nil { dragOrigin = base }
+                var x = clampUnit(startX + dx), y = clampUnit(startY + dy)
+                if index == 0 {
+                    // Bottom leg (y = 0) or left leg (x = 0), whichever the drag is nearer.
+                    if x >= y { y = 0 } else { x = 0 }
+                    if current.count > 1 { x = min(x, current[1].x - 0.02) }
+                    y = min(y, 0.95)
+                } else {
+                    // Top leg (y = 1) or right leg (x = 1).
+                    if (1 - x) >= (1 - y) { y = 1 } else { x = 1 }
+                    x = max(x, current[index - 1].x + 0.02)
+                    y = max(y, 0.05)
+                }
+                current[index] = SIMD2(clampUnit(x), clampUnit(y))
+                points = current
+            }.onEnded { _ in
+                active = nil
+                dragOrigin = nil
+            })
+            .onTapGesture(count: 2) {
+                var current = normalizedCurve(points)
+                current[index] = index == 0 ? SIMD2(0, 0) : SIMD2(1, 1)
+                points = current
+            }
+            .help(index == 0
+                  ? "Black point — drag along the bottom to crush shadows, up the left edge to lift them. Double-click resets."
+                  : "White point — drag along the top to clip highlights, down the right edge to mute them. Double-click resets.")
+            .position(x: size.width * p.x, y: size.height * (1 - p.y))
+    }
+
+    @State private var dragOrigin: SIMD2<Double>?
+
+    private func label(for p: SIMD2<Double>, isBlack: Bool) -> String {
+        if isBlack {
+            return p.x > 0.001 ? "Black in \(Int((p.x * 100).rounded()))" : "Black out \(Int((p.y * 100).rounded()))"
+        }
+        return p.x < 0.999 ? "White in \(Int((p.x * 100).rounded()))" : "White out \(Int((p.y * 100).rounded()))"
     }
 }
 

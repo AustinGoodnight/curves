@@ -103,6 +103,9 @@ public final class RawImageRenderer {
         if let rgbCurve = params.rgbCurve {
             output = RGBCurveKernel.apply(to: output, params: rgbCurve)
         }
+        if let rgbCurve2 = params.rgbCurve2 {
+            output = RGBCurveKernel.apply(to: output, params: rgbCurve2)
+        }
         if let lut3D = params.lut3D {
             output = LUT3DFilter.apply(to: output, params: lut3D)
         }

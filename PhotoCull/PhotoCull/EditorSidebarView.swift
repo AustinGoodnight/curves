@@ -32,6 +32,11 @@ struct EditorSidebarView: View {
     @State private var lutPreviewStore = LUTPreviewStore()
     /// The Curve section's Presets panel (header button) — expanded or not.
     @State private var isShowingCurvePresets = false
+    /// Which of the stage's two stacked curves the Curve section is editing (header's 1|2).
+    @State private var selectedCurve = 1
+    /// Shared with `CurveWorkbench` (same key) — the header button flips it, the workbench lays out
+    /// by it.
+    @AppStorage(CurveWorkbench.collapsedKey) private var isCurveCollapsed = false
 
     /// Purely local UI state, not persisted: reopening the editor always starts closed, since
     /// "most of the time I leave it at default" was the whole reason for hiding these behind a
@@ -139,6 +144,61 @@ struct EditorSidebarView: View {
                         }
                         styleOption("C · Ramp Mapping") {
                             ContrastRampMapping(value: contrastBinding)
+                        }
+                    }
+                    devComparisonPanel("Detail Styles") {
+                        styleOption("A · Knobs + Close-Up (drag a knob)") {
+                            DetailStyleLayout(style: .knobsCloseUp, bindings: detailBindings, previewImage: coordinator.previewImage)
+                        }
+                        styleOption("B · Hairline Rows") {
+                            DetailStyleLayout(style: .hairlineRows, bindings: detailBindings, previewImage: coordinator.previewImage)
+                        }
+                        styleOption("C · Strength Steps") {
+                            DetailStyleLayout(style: .strengthSteps, bindings: detailBindings, previewImage: coordinator.previewImage)
+                        }
+                        styleOption("D · Close-Up Header") {
+                            DetailStyleLayout(style: .closeUpHeader, bindings: detailBindings, previewImage: coordinator.previewImage)
+                        }
+                    }
+                    devComparisonPanel("Color Intensity Knob Layouts") {
+                        Text("Visualization on top, rotary knobs below — all drive the real controls.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        styleOption("A · Scope + Bipolar Knobs") {
+                            IntensityKnobLayout(style: .scopeBipolar, bindings: colorIntensityBindings,
+                                                vectorscope: coordinator.vectorscopeImage, photoColor: dominantPhotoColor(coordinator.toneStats))
+                        }
+                        styleOption("B · Response Curve + Bipolar Knobs") {
+                            IntensityKnobLayout(style: .curveBipolar, bindings: colorIntensityBindings,
+                                                vectorscope: coordinator.vectorscopeImage, photoColor: dominantPhotoColor(coordinator.toneStats))
+                        }
+                        styleOption("C · Before/After Swatches + Tinted-Ring Knobs") {
+                            IntensityKnobLayout(style: .swatchesTinted, bindings: colorIntensityBindings,
+                                                vectorscope: coordinator.vectorscopeImage, photoColor: dominantPhotoColor(coordinator.toneStats))
+                        }
+                        styleOption("D · Scope + Classic Knobs") {
+                            IntensityKnobLayout(style: .scopeClassic, bindings: colorIntensityBindings,
+                                                vectorscope: coordinator.vectorscopeImage, photoColor: dominantPhotoColor(coordinator.toneStats))
+                        }
+                    }
+                    devComparisonPanel("Color Intensity Styles") {
+                        Text("All five drive the real Chroma / Vibrance / Saturation below.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        styleOption("1 · Response Curve (muted → vivid)") {
+                            IntensityResponseCurve(bindings: colorIntensityBindings)
+                        }
+                        styleOption("2 · Photo-Color Tracks") {
+                            IntensityPhotoTracks(bindings: colorIntensityBindings, photoColor: dominantPhotoColor(coordinator.toneStats))
+                        }
+                        styleOption("3 · Scope-Linked") {
+                            IntensityScopeLinked(bindings: colorIntensityBindings, vectorscope: coordinator.vectorscopeImage)
+                        }
+                        styleOption("4 · Bipolar Rows") {
+                            IntensityBipolarRows(bindings: colorIntensityBindings)
+                        }
+                        styleOption("5 · Intensity Pad (x = vibrance, y = saturation)") {
+                            IntensityPad(bindings: colorIntensityBindings, photoColor: dominantPhotoColor(coordinator.toneStats))
                         }
                     }
                     devComparisonPanel("Curve Editor Styles") {
@@ -340,61 +400,67 @@ struct EditorSidebarView: View {
                     }
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    // Three independent regions, same technique as `ColorBalanceBarView.colorZonesSection`'s
-                    // own header — "Curve" + reset pinned leading, "Preserve Color" truly centered on the
-                    // row's full width, the module enabled toggle pinned trailing. A single `HStack` with
-                    // `Spacer()`s in between would center "Preserve Color" in whatever's left between the
-                    // other two instead of on the row as a whole, drifting depending on how wide "Curve"'s
-                    // own leading cluster happens to render.
-                    ZStack {
-                        HStack(spacing: 4) {
-                            sectionTitle("Curve", enabled: stageBoolBind(\.editRGBCurveEnabled))
-                            resetButton(disabled: !rgbCurveHasAdjustments(stage), action: {
-                                resetRGBCurve(stage)
-                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
-                            })
-                            Spacer(minLength: 0)
-                        }
-                        HStack(spacing: 6) {
-                            Text("Preserve Color")
-                                .font(.subheadline)
+                    // One flowing row — "Curve", the 1|2 curve switcher, reset and compact toggle on
+                    // the left; Presets and the module toggle on the right; "Preserve Color" between
+                    // them, collapsing to just its dot (with a tooltip) when the sidebar is too narrow
+                    // for the label. (It used to be pinned dead-center in a ZStack, which stopped
+                    // fitting once the 1|2 switcher joined the left cluster.)
+                    HStack(spacing: 4) {
+                        sectionTitle("Curve", enabled: stageBoolBind(\.editRGBCurveEnabled))
+                        curveSwitcher
+                        resetButton(disabled: !rgbCurveHasAdjustments(stage), action: {
+                            resetRGBCurve(stage)
+                            scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                        })
+                        Button {
+                            isCurveCollapsed.toggle()
+                        } label: {
+                            Image(systemName: isCurveCollapsed ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
+                                .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
-                            StoplightToggle(isOn: Binding(
-                                get: { stage.editRGBCurvePreserveColors ?? true },
-                                set: { newValue in
-                                    let hadAdjustments = rgbCurveGate.hasAdjustments()
-                                    stage.editRGBCurvePreserveColors = newValue
-                                    syncModuleEnabled(rgbCurveGate, hadAdjustments: hadAdjustments)
-                                    scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
-                                }
-                            ))
+                                .frame(width: 20, height: 18)
+                                .contentShape(Rectangle())
                         }
-                        HStack(spacing: 4) {
-                            Spacer(minLength: 0)
-                            Button {
-                                withAnimation(.snappy(duration: 0.2)) { isShowingCurvePresets.toggle() }
-                            } label: {
-                                HStack(spacing: 3) {
-                                    Text("Presets").font(.caption)
-                                    Image(systemName: "chevron.down")
-                                        .font(.system(size: 8, weight: .semibold))
-                                        .rotationEffect(.degrees(isShowingCurvePresets ? 180 : 0))
-                                }
-                                .foregroundStyle(isShowingCurvePresets ? Color.primary : Color.secondary)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(
-                                    isShowingCurvePresets ? Color.white.opacity(0.12) : Color.clear,
-                                    in: Capsule()
-                                )
+                        .buttonStyle(.plain)
+                        .help(isCurveCollapsed ? "Show the full curve editor" : "Compact curve — just the graph")
+                        Spacer(minLength: 6)
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 6) {
+                                Text("Preserve Color")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize()
+                                StoplightToggle(isOn: preserveColorsBinding)
                             }
-                            .buttonStyle(.plain)
-                            .help("Start from a common curve shape")
-                            StoplightToggle(isOn: stageBoolBind(\.editRGBCurveEnabled))
+                            StoplightToggle(isOn: preserveColorsBinding)
+                                .help("Preserve Color")
                         }
+                        Spacer(minLength: 6)
+                        Button {
+                            withAnimation(.snappy(duration: 0.2)) { isShowingCurvePresets.toggle() }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Text("Presets").font(.caption)
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .rotationEffect(.degrees(isShowingCurvePresets ? 180 : 0))
+                            }
+                            .foregroundStyle(isShowingCurvePresets ? Color.primary : Color.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(
+                                isShowingCurvePresets ? Color.white.opacity(0.12) : Color.clear,
+                                in: Capsule()
+                            )
+                            .fixedSize()
+                        }
+                        .buttonStyle(.plain)
+                        .help("Start from a common curve shape")
+                        StoplightToggle(isOn: stageBoolBind(\.editRGBCurveEnabled))
                     }
                     if isShowingCurvePresets {
                         CurvePresetChips(points: curvePointsBinding)
+                            .id(selectedCurve)
                             .padding(10)
                             .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
                             .transition(.opacity.combined(with: .move(edge: .top)))
@@ -405,6 +471,7 @@ struct EditorSidebarView: View {
                         points: curvePointsBinding, histogram: coordinator.luminanceHistogram,
                         height: rgbCurveHeight(for: width)
                     )
+                    .id(selectedCurve)
                     // A precise numeric nudge, separate from dragging the graph's own bottom-left
                     // endpoint — small range ("slightly") since this is meant for a fine trim, not
                     // a replacement for Filmic's much wider Black EV control.
@@ -412,79 +479,29 @@ struct EditorSidebarView: View {
                         "Black Lift Precise", value: stageBind(\.editRGBCurveBlackLift, fallback: 0, module: rgbCurveGate),
                         range: 0...0.15, resetValue: 0, ticks: [0, 0.05, 0.1, 0.15]
                     )
-                    // The Balance knobs sit in a recessed rounded box — same fill and corner radius
-                    // as the Tone Mapper picker row above, spanning the sidebar's width, with a bit
-                    // more internal padding so the knobs don't crowd its edges.
-                    // Balance (Chroma/Vibrance/Saturation) — moved here from `ColorBalanceBarView`'s
-                    // bottom bar as a row of knobs matching the Detail row below. All three read on a
-                    // signed −100…+100 scale (Chroma/Vibrance's native ±0.5 × 200). No on/off switch:
-                    // `balanceGate` keeps `editBalanceEnabled` synced to whether any has an adjustment,
-                    // and `colorBalanceGate` does the same for Color Balance RGB's outer switch.
-                    HStack(alignment: .top, spacing: 0) {
-                        knob(
-                            "Chroma", value: stageBind(
-                                \.editColorBalanceChromaGlobal, fallback: 0, module: balanceGate, masterModule: colorBalanceGate
-                            ),
-                            range: -0.5...0.5, resetValue: 0, valueText: { signedText($0 * 200) }
-                        )
-                        knob(
-                            "Vibrance", value: stageBind(
-                                \.editColorBalanceVibrance, fallback: 0, module: balanceGate, masterModule: colorBalanceGate
-                            ),
-                            range: -0.5...0.5, resetValue: 0, valueText: { signedText($0 * 200) }
-                        )
-                        knob(
-                            "Saturation", value: stageBind(
-                                \.editFilmicSaturation, fallback: FilmicRGBParameters.darktableDefault.saturation,
-                                module: balanceGate, masterModule: colorBalanceGate
-                            ),
-                            range: -100...100, resetValue: FilmicRGBParameters.darktableDefault.saturation,
-                            valueText: { signedText($0) }
-                        )
-                    }
+                    // Chroma / Vibrance / Saturation — layout C's knobs from the Developer Mode
+                    // comparison (`ColorIntensityConcepts.swift`), without its before/after swatches:
+                    // three knobs whose rings shade grey → the photo's own color. Same fields and module syncing as before
+                    // (`colorIntensityBindings`); no on/off switch — `balanceGate`/`colorBalanceGate`
+                    // auto-sync.
+                    IntensityKnobLayout(
+                        style: .swatchesTinted, bindings: colorIntensityBindings,
+                        vectorscope: nil, photoColor: dominantPhotoColor(coordinator.toneStats),
+                        showsVisualization: false
+                    )
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 16)
+                    .padding(.vertical, 14)
                     .frame(maxWidth: .infinity)
                     .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
                     .padding(.top, 4)
-                    // Detail (Sharp/Dehaze/Denoise) and Lens Correction — moved here from
-                    // `ColorBalanceBarView`'s bottom bar, as one row of the same `KnobControl` the Film
-                    // Simulation section uses for LUT Intensity, each with its name and percentage
-                    // underneath. No on/off switches: `detailGate` keeps `editDetailEnabled` synced to
-                    // whether any of the three has an adjustment, and Lens at 0 turns
-                    // `editLensCorrectionEnabled` off (anything above 0 turns it back on, so a disabled
-                    // photo reads as 0). Sharpness is a native `CIRAWFilter` input, so it's only shown
-                    // when the renderer supports it.
-                    HStack(alignment: .top, spacing: 0) {
-                        if coordinator.isReady && coordinator.renderer.isSharpnessSupported {
-                            knob(
-                                "Sharpness", value: bind(
-                                    \.editSharpnessAmount, fallback: coordinator.renderer.defaultSharpnessAmount, module: detailGate
-                                ),
-                                resetValue: coordinator.renderer.defaultSharpnessAmount
-                            )
-                        }
-                        knob("Dehaze", value: stageBind(\.editDehazeAmount, fallback: 0, module: detailGate), resetValue: 0)
-                        knob("Denoise", value: bind(\.editDenoiseAmount, fallback: 0, module: detailGate), resetValue: 0)
-                        knob(
-                            "Lens", value: Binding(
-                                get: { asset.editLensCorrectionEnabled ? (asset.editLensCorrectionIntensity ?? 1) : 0 },
-                                set: { newValue in
-                                    asset.editLensCorrectionEnabled = newValue > 0
-                                    asset.editLensCorrectionIntensity = newValue
-                                    scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
-                                }
-                            ),
-                            resetValue: 1
-                        )
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 16)
-                    .frame(maxWidth: .infinity)
-                    .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
-                    // Same 14pt gap (the VStack's 10 + 4) as between Black Lift Precise and the
-                    // Balance box above.
-                    .padding(.top, 4)
+                    // Sharpness / Dehaze / Denoise / Lens — "Close-Up Header" from the Developer Mode
+                    // comparison (`DetailStyles.swift`): these effects are invisible at fit-to-window
+                    // size, so a close-up of the live render sits above four hairline sliders, its spot
+                    // picked with stoplight dots (Detail / Smooth / Corner, found automatically) and
+                    // jumping to whichever control is being dragged. Same fields, `detailGate` syncing
+                    // and lens on/off-at-zero behavior as before (`detailBindings`).
+                    DetailStyleLayout(style: .closeUpHeader, bindings: detailBindings, previewImage: coordinator.previewImage)
+                        .padding(.top, 8)
                 }
             }
             .padding()
@@ -492,39 +509,6 @@ struct EditorSidebarView: View {
         .background(uiColors.sidebarBackground)
         .toggleStyle(.switch)
         .disabled(!coordinator.isReady)
-    }
-
-    /// One `KnobControl` column — knob on top with its value readout centered inside the dial, name
-    /// centered below. Each column takes an equal share
-    /// of the row's width, so however many knobs are shown spread evenly across it. `valueText`
-    /// defaults to a 0–100% readout for the 0...1 Detail/Lens knobs.
-    private func knob(
-        _ title: String, value: Binding<Double>, range: ClosedRange<Double> = 0...1, resetValue: Double,
-        valueText: ((Double) -> String)? = nil
-    ) -> some View {
-        VStack(spacing: 6) {
-            KnobControl(value: value, range: range, resetValue: resetValue)
-                // The readout sits inside the dial, centered, in a quiet grey so it reads as a
-                // label on the dial rather than competing with it. `allowsHitTesting(false)` so a
-                // drag starting on the number still reaches the knob underneath.
-                .overlay {
-                    Text(valueText?(value.wrappedValue) ?? String(format: "%.0f%%", value.wrappedValue * 100))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .allowsHitTesting(false)
-                }
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    /// Signed whole-number readout ("+12", "0", "−30") for the Balance knobs, scaled so all three
-    /// read on the same −100…+100 range.
-    private func signedText(_ value: Double) -> String {
-        let rounded = Int(value.rounded())
-        return rounded > 0 ? "+\(rounded)" : "\(rounded)"
     }
 
     /// The Off/Filmic/AgX selection — shared by the segmented `Picker` and every candidate style in
@@ -563,17 +547,102 @@ struct EditorSidebarView: View {
         }
     }
 
-    /// The RGB curve's points — used by `CurveWorkbench`, the Presets panel, and the Developer Mode
-    /// curve concepts (flatten, keep the module switch synced, render).
-    private var curvePointsBinding: Binding<[SIMD2<Double>]> {
+    /// "1 | 2" — which stacked curve the section edits. A small dot under a number marks a curve
+    /// that actually has a shape (so a shaped curve 2 is visible while you're on 1, and vice versa);
+    /// straight curves aren't rendered at all (`rgbCurveParameters`/`rgbCurve2Parameters`).
+    private var curveSwitcher: some View {
+        HStack(spacing: 0) {
+            ForEach([1, 2], id: \.self) { number in
+                let isSelected = selectedCurve == number
+                let isShaped = number == 1
+                    ? !isIdentityCurve(rgbCurvePoints(for: stage))
+                    : !isIdentityCurve(rgbCurve2Points(for: stage))
+                Button {
+                    selectedCurve = number
+                } label: {
+                    Text("\(number)")
+                        .font(.caption2.weight(isSelected ? .semibold : .regular).monospacedDigit())
+                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                        .frame(width: 18, height: 16)
+                        .background(isSelected ? Color.white.opacity(0.14) : Color.clear, in: Capsule())
+                        .overlay(alignment: .bottom) {
+                            if isShaped {
+                                Circle().fill(uiColors.accentColor).frame(width: 3, height: 3).offset(y: 3)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .help(number == 1 ? "Curve 1" : "Curve 2 — applied after curve 1")
+            }
+        }
+        .padding(2)
+        .background(uiColors.recessedTrackBackground, in: Capsule())
+    }
+
+    private var preserveColorsBinding: Binding<Bool> {
         Binding(
-            get: { rgbCurvePoints(for: stage) },
-            set: { newPoints in
+            get: { stage.editRGBCurvePreserveColors ?? true },
+            set: { newValue in
                 let hadAdjustments = rgbCurveGate.hasAdjustments()
-                stage.editRGBCurvePoints = newPoints.flatMap { [$0.x, $0.y] }
+                stage.editRGBCurvePreserveColors = newValue
                 syncModuleEnabled(rgbCurveGate, hadAdjustments: hadAdjustments)
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
+        )
+    }
+
+    /// The selected curve's points (1 or 2, per the header switcher) — used by `CurveWorkbench`,
+    /// the Presets panel, and the Developer Mode curve concepts (flatten, keep the module switch
+    /// synced, render).
+    private var curvePointsBinding: Binding<[SIMD2<Double>]> {
+        Binding(
+            get: { selectedCurve == 2 ? rgbCurve2Points(for: stage) : rgbCurvePoints(for: stage) },
+            set: { newPoints in
+                let hadAdjustments = rgbCurveGate.hasAdjustments()
+                let flat = newPoints.flatMap { [$0.x, $0.y] }
+                if selectedCurve == 2 {
+                    stage.editRGBCurve2Points = flat
+                } else {
+                    stage.editRGBCurvePoints = flat
+                }
+                syncModuleEnabled(rgbCurveGate, hadAdjustments: hadAdjustments)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+            }
+        )
+    }
+
+    /// The real Chroma / Vibrance / Saturation bindings (with `balanceGate`/`colorBalanceGate`
+    /// module syncing) — for the sidebar's color intensity panel and its Developer Mode concepts.
+    private var colorIntensityBindings: ColorIntensityBindings {
+        ColorIntensityBindings(
+            chroma: stageBind(\.editColorBalanceChromaGlobal, fallback: 0, module: balanceGate, masterModule: colorBalanceGate),
+            vibrance: stageBind(\.editColorBalanceVibrance, fallback: 0, module: balanceGate, masterModule: colorBalanceGate),
+            saturation: stageBind(
+                \.editFilmicSaturation, fallback: FilmicRGBParameters.darktableDefault.saturation,
+                module: balanceGate, masterModule: colorBalanceGate
+            ),
+            saturationDefault: FilmicRGBParameters.darktableDefault.saturation
+        )
+    }
+
+    /// The real Sharpness / Dehaze / Denoise / Lens bindings (with `detailGate` syncing and lens
+    /// on/off-at-zero) — for the sidebar's detail panel and its Developer Mode concepts.
+    private var detailBindings: DetailBindings {
+        DetailBindings(
+            sharpness: coordinator.isReady && coordinator.renderer.isSharpnessSupported
+                ? bind(\.editSharpnessAmount, fallback: coordinator.renderer.defaultSharpnessAmount, module: detailGate)
+                : nil,
+            sharpnessDefault: coordinator.renderer.defaultSharpnessAmount,
+            dehaze: stageBind(\.editDehazeAmount, fallback: 0, module: detailGate),
+            denoise: bind(\.editDenoiseAmount, fallback: 0, module: detailGate),
+            lens: Binding(
+                get: { asset.editLensCorrectionEnabled ? (asset.editLensCorrectionIntensity ?? 1) : 0 },
+                set: { newValue in
+                    asset.editLensCorrectionEnabled = newValue > 0
+                    asset.editLensCorrectionIntensity = newValue
+                    scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                }
+            )
         )
     }
 

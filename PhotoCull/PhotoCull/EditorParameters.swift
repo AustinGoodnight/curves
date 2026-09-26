@@ -160,12 +160,43 @@ func rgbCurvePoints(for stage: Stage) -> [SIMD2<Double>] {
     return stride(from: 0, to: flat.count, by: 2).map { SIMD2(flat[$0], flat[$0 + 1]) }
 }
 
+/// `nil` — so no kernel pass runs at all — when the module is off, or when curve 1 is a straight
+/// line with no black lift (nothing to do, so don't pay for a render pass doing it).
 func rgbCurveParameters(for stage: Stage) -> RGBCurveParameters? {
     guard stage.editRGBCurveEnabled else { return nil }
+    let points = rgbCurvePoints(for: stage)
+    let blackLift = stage.editRGBCurveBlackLift ?? 0
+    guard !isIdentityCurve(points) || blackLift != 0 else { return nil }
     return RGBCurveParameters(
-        points: rgbCurvePoints(for: stage), preserveColors: stage.editRGBCurvePreserveColors ?? true,
-        blackLift: stage.editRGBCurveBlackLift ?? 0
+        points: points, preserveColors: stage.editRGBCurvePreserveColors ?? true, blackLift: blackLift
     )
+}
+
+/// The stacked second curve (Curve "2" tab) — same enable switch and Preserve Color as curve 1,
+/// no black lift of its own; `nil` (skipped entirely) while it's a straight line.
+func rgbCurve2Parameters(for stage: Stage) -> RGBCurveParameters? {
+    guard stage.editRGBCurveEnabled else { return nil }
+    let points = rgbCurve2Points(for: stage)
+    guard !isIdentityCurve(points) else { return nil }
+    return RGBCurveParameters(points: points, preserveColors: stage.editRGBCurvePreserveColors ?? true)
+}
+
+func rgbCurve2Points(for stage: Stage) -> [SIMD2<Double>] {
+    guard let flat = stage.editRGBCurve2Points, flat.count >= 4, flat.count.isMultiple(of: 2) else {
+        return RGBCurveParameters.identityPoints
+    }
+    return stride(from: 0, to: flat.count, by: 2).map { SIMD2(flat[$0], flat[$0 + 1]) }
+}
+
+/// True when every point sits on the diagonal and the ends are at (0,0) and (1,1) — the curve
+/// maps every tone to itself, whatever points it happens to contain.
+func isIdentityCurve(_ points: [SIMD2<Double>]) -> Bool {
+    let sorted = points.sorted { $0.x < $1.x }
+    guard let first = sorted.first, let last = sorted.last else { return true }
+    let tolerance = 1e-4
+    return abs(first.x) < tolerance && abs(first.y) < tolerance
+        && abs(last.x - 1) < tolerance && abs(last.y - 1) < tolerance
+        && sorted.allSatisfy { abs($0.y - $0.x) < tolerance }
 }
 
 /// Same flat-interleaved <-> `[SIMD2<Double>]` conversion as `rgbCurvePoints`, but generalized
@@ -202,6 +233,7 @@ func stageParameters(for stage: Stage, detailEnabled: Bool) -> StageParameters {
         colorBalanceRGB: colorBalanceParameters(for: stage),
         colorZones: colorZonesParameters(for: stage),
         rgbCurve: rgbCurveParameters(for: stage),
+        rgbCurve2: rgbCurve2Parameters(for: stage),
         lut3D: lut3DParameters(for: stage),
         maskData: stage.maskData
     )
@@ -331,6 +363,7 @@ func colorBalanceHasAdjustments(_ stage: Stage) -> Bool {
 
 func rgbCurveHasAdjustments(_ stage: Stage) -> Bool {
     stage.editRGBCurvePoints != nil || stage.editRGBCurvePreserveColors != nil || stage.editRGBCurveBlackLift != nil
+        || stage.editRGBCurve2Points != nil
 }
 
 func colorZonesHasAdjustments(_ stage: Stage) -> Bool {
@@ -378,6 +411,7 @@ func objectRemovalHasAdjustments(_ asset: PhotoAsset) -> Bool {
 func resetRGBCurve(_ stage: Stage) {
     stage.editRGBCurveEnabled = false
     stage.editRGBCurvePoints = nil
+    stage.editRGBCurve2Points = nil
     stage.editRGBCurvePreserveColors = nil
     stage.editRGBCurveBlackLift = nil
 }

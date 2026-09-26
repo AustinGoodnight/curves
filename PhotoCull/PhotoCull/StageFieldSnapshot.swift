@@ -48,6 +48,7 @@ struct StageFieldSnapshot: Codable, Equatable, Sendable {
     var editRGBCurvePoints: [Double]?
     var editRGBCurvePreserveColors: Bool?
     var editRGBCurveBlackLift: Double?
+    var editRGBCurve2Points: [Double]?
 
     var editColorZonesEnabled: Bool
     var editColorZonesLightnessPoints: [Double]?
@@ -119,6 +120,7 @@ struct StageFieldSnapshot: Codable, Equatable, Sendable {
         editRGBCurvePoints = stage.editRGBCurvePoints
         editRGBCurvePreserveColors = stage.editRGBCurvePreserveColors
         editRGBCurveBlackLift = stage.editRGBCurveBlackLift
+        editRGBCurve2Points = stage.editRGBCurve2Points
 
         editColorZonesEnabled = stage.editColorZonesEnabled
         editColorZonesLightnessPoints = stage.editColorZonesLightnessPoints
@@ -191,6 +193,7 @@ struct StageFieldSnapshot: Codable, Equatable, Sendable {
         stage.editRGBCurvePoints = editRGBCurvePoints
         stage.editRGBCurvePreserveColors = editRGBCurvePreserveColors
         stage.editRGBCurveBlackLift = editRGBCurveBlackLift
+        stage.editRGBCurve2Points = editRGBCurve2Points
 
         stage.editColorZonesEnabled = editColorZonesEnabled
         stage.editColorZonesLightnessPoints = editColorZonesLightnessPoints
@@ -296,6 +299,7 @@ extension StageFieldSnapshot {
             result.editRGBCurvePoints = next.editRGBCurvePoints ?? result.editRGBCurvePoints
             result.editRGBCurvePreserveColors = next.editRGBCurvePreserveColors ?? result.editRGBCurvePreserveColors
             result.editRGBCurveBlackLift = next.editRGBCurveBlackLift ?? result.editRGBCurveBlackLift
+            result.editRGBCurve2Points = next.editRGBCurve2Points ?? result.editRGBCurve2Points
 
             result.editColorZonesEnabled = result.editColorZonesEnabled && next.editColorZonesEnabled
             result.editColorZonesLightnessPoints = next.editColorZonesLightnessPoints ?? result.editColorZonesLightnessPoints
@@ -358,7 +362,8 @@ extension StageFieldSnapshot {
             changed.insert("Color Balance RGB")
         }
         if editRGBCurveEnabled != other.editRGBCurveEnabled || editRGBCurvePoints != other.editRGBCurvePoints
-            || editRGBCurvePreserveColors != other.editRGBCurvePreserveColors || editRGBCurveBlackLift != other.editRGBCurveBlackLift {
+            || editRGBCurvePreserveColors != other.editRGBCurvePreserveColors || editRGBCurveBlackLift != other.editRGBCurveBlackLift
+            || editRGBCurve2Points != other.editRGBCurve2Points {
             changed.insert("RGB Curve")
         }
         if editColorZonesEnabled != other.editColorZonesEnabled || editColorZonesLightnessPoints != other.editColorZonesLightnessPoints

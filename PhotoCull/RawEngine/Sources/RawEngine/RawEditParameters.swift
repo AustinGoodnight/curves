@@ -92,6 +92,9 @@ public struct StageParameters: Equatable, Sendable {
     /// matching where a Lightroom-style tone curve sits in most editors (see
     /// `RGBCurveParameters`).
     public var rgbCurve: RGBCurveParameters?
+    /// `nil` means "no second curve". Applied immediately after `rgbCurve` — a second, stacked
+    /// tone curve (the editor's Curve "2" tab).
+    public var rgbCurve2: RGBCurveParameters?
     /// `nil` means "no 3D LUT". Applied last, after every other grading pass — a "film
     /// simulation"/creative-look grade layered on top of the already-graded image, matching how
     /// LUT packs from VSCO/RNI/etc. are meant to be used (see `LUT3DParameters`).
@@ -108,6 +111,7 @@ public struct StageParameters: Equatable, Sendable {
         colorBalanceRGB: ColorBalanceRGBParameters? = nil,
         colorZones: ColorZonesParameters? = nil,
         rgbCurve: RGBCurveParameters? = nil,
+        rgbCurve2: RGBCurveParameters? = nil,
         lut3D: LUT3DParameters? = nil,
         maskData: Data? = nil
     ) {
@@ -117,6 +121,7 @@ public struct StageParameters: Equatable, Sendable {
         self.colorBalanceRGB = colorBalanceRGB
         self.colorZones = colorZones
         self.rgbCurve = rgbCurve
+        self.rgbCurve2 = rgbCurve2
         self.lut3D = lut3D
         self.maskData = maskData
     }
@@ -124,7 +129,8 @@ public struct StageParameters: Equatable, Sendable {
     /// True when this stage contributes no kernel passes at all — the render loop can skip it
     /// entirely rather than running through the no-op checks.
     public var isEmpty: Bool {
-        dehaze == nil && filmicRGB == nil && agx == nil && colorBalanceRGB == nil && colorZones == nil && rgbCurve == nil && lut3D == nil
+        dehaze == nil && filmicRGB == nil && agx == nil && colorBalanceRGB == nil && colorZones == nil && rgbCurve == nil
+            && rgbCurve2 == nil && lut3D == nil
     }
 
     public static let none = StageParameters()

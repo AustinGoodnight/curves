@@ -217,6 +217,11 @@ public final class Stage {
     /// exist alongside a graph-free module. Gated by `editRGBCurveEnabled`, same as the curve
     /// itself — see `RGBCurveKernel`'s doc comment for where this applies in the shader.
     public var editRGBCurveBlackLift: Double?
+    /// A second tone curve, applied right after the first (same flat `[x0, y0, x1, y1, …]`
+    /// layout, same enable switch and Preserve Color setting) — the Curve section's "2" tab. Lets
+    /// a creative curve be stacked on a corrective one without merging them into a single shape.
+    /// `nil` (or a straight line) means it isn't rendered at all.
+    public var editRGBCurve2Points: [Double]?
 
     /// `false` by default/when empty, same auto-managed convention as `editFilmicEnabled` above.
     public var editColorZonesEnabled: Bool = false
