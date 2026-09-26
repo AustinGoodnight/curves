@@ -23,4 +23,7 @@ enum WhiteBalanceControlStyle: String, CaseIterable, Identifiable {
 /// a key string typo doesn't silently split what's meant to be one setting into two.
 enum AppSettingsKey {
     static let whiteBalanceControlStyle = "whiteBalanceControlStyle"
+    /// Settings > Developer — shows in-progress design comparison panels in the editor (e.g. the
+    /// "Tone Mapper Styles" panel) and unlocks the Component Gallery window.
+    static let developerMode = "developerMode"
 }

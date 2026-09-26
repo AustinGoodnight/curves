@@ -10,7 +10,7 @@ import SwiftUI
 /// adding a `Pane` case and a `@ViewBuilder` for it, not by stacking more rows into an existing one.
 struct SettingsView: View {
     enum Pane: String, CaseIterable, Identifiable {
-        case editor, luts, presets, appearance
+        case editor, luts, presets, appearance, developer
 
         var id: Self { self }
 
@@ -20,6 +20,7 @@ struct SettingsView: View {
             case .luts: return "LUTs"
             case .presets: return "Presets"
             case .appearance: return "Appearance"
+            case .developer: return "Developer"
             }
         }
 
@@ -29,13 +30,16 @@ struct SettingsView: View {
             case .luts: return "camera.filters"
             case .presets: return "square.stack"
             case .appearance: return "paintpalette"
+            case .developer: return "hammer"
             }
         }
     }
 
     @AppStorage(AppSettingsKey.whiteBalanceControlStyle) private var whiteBalanceStyle: WhiteBalanceControlStyle = .classic
+    @AppStorage(AppSettingsKey.developerMode) private var developerMode = false
     @Environment(ColorSchemeStore.self) private var uiColors
     @Environment(LUTLibrary.self) private var lutLibrary
+    @Environment(\.openWindow) private var openWindow
 
     @State private var pane: Pane = .editor
     @State private var isSavingPreset = false
@@ -131,6 +135,7 @@ struct SettingsView: View {
             case .luts: lutPane
             case .presets: presetsPane
             case .appearance: appearancePane
+            case .developer: developerPane
             }
         }
     }
@@ -209,6 +214,22 @@ struct SettingsView: View {
             Button("Manage Presets…") { isManagingEditPresets = true }
                 .buttonStyle(FilledActionButtonStyle())
                 .frame(width: 180)
+        }
+    }
+
+    private var developerPane: some View {
+        section("Developer Mode") {
+            Toggle("Developer Mode", isOn: $developerMode)
+            Text("Shows in-progress design comparisons in the editor (like the Tone Mapper Styles panel) and unlocks the Component Gallery — every custom control in the app on one page, for future design work.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                openWindow(id: ComponentGalleryView.windowID)
+            } label: {
+                Label("Open Component Gallery", systemImage: "square.grid.2x2")
+            }
+            .disabled(!developerMode)
         }
     }
 

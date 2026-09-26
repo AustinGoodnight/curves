@@ -16,10 +16,6 @@ struct LUT3DPresetMenu: View {
     let currentTitle: String?
     var onSelect: (LUTLibraryEntry) -> Void
 
-    /// Tall enough to show ~3-4 rows before scrolling, short enough that a long library doesn't
-    /// push the Intensity slider below it far down the column.
-    private static let listHeight: CGFloat = 96
-
     var body: some View {
         let entries = library.visibleEntries
         VStack(alignment: .leading, spacing: 6) {
@@ -41,7 +37,9 @@ struct LUT3DPresetMenu: View {
                         }
                     }
                 }
-                .frame(height: Self.listHeight)
+                // Fills whatever height `ColorBalanceBarView.lut3DSection` gives it (the bar's
+                // full fader height, minus the Intensity knob when a LUT is loaded).
+                .frame(maxHeight: .infinity)
             }
         }
         .onAppear { library.rescan() }

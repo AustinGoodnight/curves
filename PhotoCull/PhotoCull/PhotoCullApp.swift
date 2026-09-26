@@ -125,5 +125,14 @@ struct PhotoCullApp: App {
         // The Settings window's "Presets" pane (`PresetManagerView`) reads/writes `Preset`s, so it
         // needs the same container as the main window.
         .modelContainer(sharedModelContainer)
+
+        // Developer Mode's component gallery — opened from Settings > Developer. A single `Window`
+        // (not a `WindowGroup`) so reopening it just brings the one instance forward.
+        Window("Component Gallery", id: ComponentGalleryView.windowID) {
+            ComponentGalleryView()
+                .environment(colorSchemeStore)
+                .environment(lutLibrary)
+        }
+        .modelContainer(sharedModelContainer)
     }
 }

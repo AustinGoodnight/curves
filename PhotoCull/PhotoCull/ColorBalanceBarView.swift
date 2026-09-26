@@ -68,7 +68,7 @@ struct ColorBalanceBarView: View {
 
     var body: some View {
         // Wrapped in a horizontal `ScrollView` — every section below (`colorBalanceSection`,
-        // `detailSection`, `lensCorrectionSection`) carries its own `.fixedSize(horizontal: true)`
+        // `colorZonesSection`, `lut3DSection`) carries its own `.fixedSize(horizontal: true)`
         // (see each one's doc comment for why: without it, an idle `Spacer` would let it greedily
         // expand and shove its neighbor sideways when the window has extra width). The flip side of
         // "never compress below ideal" is "never compress at all" — with this `HStack` sitting
@@ -97,8 +97,6 @@ struct ColorBalanceBarView: View {
             HStack(alignment: .contentTop, spacing: 32) {
                 colorBalanceSection
                 colorZonesSection
-                detailSection
-                lensCorrectionSection
                 lut3DSection
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -203,100 +201,6 @@ struct ColorBalanceBarView: View {
                 }
             }
 
-            titledGroup("Balance", enabled: stageBoolBind(\.editBalanceEnabled)) {
-                HStack(alignment: .top, spacing: 26) {
-                    // No value pill for now — see `verticalGradientSlider`'s doc comment; an
-                    // empty `valueText` skips it rather than rendering a blank box. Their 2-
-                    // decimal-place values ("−0.50", "45.00") were overflowing the pill and
-                    // wrapping; Temp/Tint above don't have that problem, so they keep theirs.
-                    verticalGradientSlider(
-                        "Chr", value: stageBind(
-                            \.editColorBalanceChromaGlobal, fallback: 0, module: balanceGate, masterModule: outerColorBalanceGate
-                        ),
-                        range: -0.5...0.5, gradient: .colorIntensity,
-                        valueText: "", diamondThumb: true
-                    )
-                    verticalGradientSlider(
-                        "Vib", value: stageBind(
-                            \.editColorBalanceVibrance, fallback: 0, module: balanceGate, masterModule: outerColorBalanceGate
-                        ),
-                        range: -0.5...0.5, gradient: .colorIntensity,
-                        valueText: "", diamondThumb: true
-                    )
-                    verticalGradientSlider(
-                        "Sat", value: stageBind(
-                            \.editFilmicSaturation, fallback: FilmicRGBParameters.darktableDefault.saturation,
-                            module: balanceGate, masterModule: outerColorBalanceGate
-                        ),
-                        range: -100...100, gradient: .colorIntensity,
-                        valueText: "", resetValue: FilmicRGBParameters.darktableDefault.saturation, diamondThumb: true
-                    )
-                }
-            }
-        }
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    /// A sibling of `colorBalanceSection`/`colorZonesSection`/`lut3DSection`, not nested inside
-    /// `colorBalanceSection` — placed after Color Zones in `body`'s `HStack` rather than grouped
-    /// with the wheels/Balance faders. Uses `verticalCircleSlider` (outline track, circular
-    /// thumb) instead of `verticalGradientSlider` — an alternate fader style being tried here
-    /// before deciding whether to carry it elsewhere in the bar.
-    private var detailSection: some View {
-        titledGroup("Detail", enabled: assetBoolBind(\.editDetailEnabled)) {
-            HStack(alignment: .top, spacing: 26) {
-                // Sharpness is a native `CIRAWFilter` input (see `RawBaseParameters`), not a
-                // `Stage` field like Dehaze — same reason it's bound via `bind(...)` here instead
-                // of `stageBind(...)`, matching how Temp/Tint above are asset-level while the
-                // wheels/Balance faders are per-stage.
-                if coordinator.isReady && coordinator.renderer.isSharpnessSupported {
-                    verticalCircleSlider(
-                        "Sharp", value: bind(
-                            \.editSharpnessAmount, fallback: coordinator.renderer.defaultSharpnessAmount, module: detailGate
-                        ),
-                        range: 0...1, valueText: "", resetValue: coordinator.renderer.defaultSharpnessAmount, diamondThumb: true
-                    )
-                }
-                verticalCircleSlider(
-                    "Dehaze", value: stageBind(\.editDehazeAmount, fallback: 0, module: detailGate),
-                    range: 0...1, valueText: "", diamondThumb: true
-                )
-                // Asset-level like Sharpness above (see `PhotoAsset.editDenoiseAmount`'s doc
-                // comment), so `bind(...)` not `stageBind(...)`. No `isSharpnessSupported`-style
-                // availability guard — OIDN's Metal device is either up at process launch or it
-                // isn't (`DenoiseFilter.device`), and when it's down the filter just no-ops, same
-                // as dragging this fader to 0.
-                verticalCircleSlider(
-                    "Denoise", value: bind(\.editDenoiseAmount, fallback: 0, module: detailGate),
-                    range: 0...1, valueText: "", diamondThumb: true
-                )
-            }
-        }
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    /// Undoes the geometric distortion/vignetting/chromatic aberration of whichever lens matched
-    /// this asset's own EXIF (`PhotoAsset.cameraModel`/`lensModel`/`focalLength`/`aperture`) in
-    /// `LensCorrectionDatabase` — see `RawBaseParameters.lensCorrection`'s doc comment for why this
-    /// is asset-level like WB/Detail rather than a `Stage`. No "matched: <lens name>" status label
-    /// here even though it'd be a nice touch — the lookup itself is a ~1500-entry scan, and this
-    /// view's `body` reruns on every fader drag in the editor (see the app target's `CLAUDE.md`), so
-    /// calling it from here would repeat the exact "expensive computed property read in body"
-    /// mistake that file documents at length; the toggle/knob below stay visible unconditionally
-    /// rather than only appearing once a match is confirmed.
-    private var lensCorrectionSection: some View {
-        titledGroup("Lens", enabled: assetBoolBind(\.editLensCorrectionEnabled)) {
-            HStack(spacing: 8) {
-                KnobControl(value: bind(\.editLensCorrectionIntensity, fallback: 1), range: 0...1, resetValue: 1)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Amount")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(String(format: "%.0f%%", (asset.editLensCorrectionIntensity ?? 1) * 100))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.primary)
-                }
-            }
         }
         .fixedSize(horizontal: true, vertical: false)
     }
@@ -485,23 +389,12 @@ struct ColorBalanceBarView: View {
         ModuleGate(hasAdjustments: { colorWheelsHasAdjustments(stage) }, setEnabled: { stage.editColorWheelsEnabled = $0 })
     }
 
-    private var balanceGate: ModuleGate {
-        ModuleGate(hasAdjustments: { balanceGroupHasAdjustments(stage) }, setEnabled: { stage.editBalanceEnabled = $0 })
-    }
-
     /// The whole Color Balance RGB module's outer bypass switch — see `stageBind`'s
     /// `masterModule` doc comment for why the Wheels/Balance sub-groups need to sync this in
     /// addition to their own inner gate above. Matches `EditorSidebarView`'s identically-defined
     /// `colorBalanceGate` (Contrast's own gate, since Contrast has no inner sub-group).
     private var outerColorBalanceGate: ModuleGate {
         ModuleGate(hasAdjustments: { colorBalanceHasAdjustments(stage) }, setEnabled: { stage.editColorBalanceEnabled = $0 })
-    }
-
-    private var detailGate: ModuleGate {
-        ModuleGate(
-            hasAdjustments: { detailHasAdjustments(asset: asset, stage: stage) },
-            setEnabled: { asset.editDetailEnabled = $0 }
-        )
     }
 
     private var colorZonesGate: ModuleGate {
@@ -659,19 +552,11 @@ struct ColorBalanceBarView: View {
     /// its exact `colorZonesToolbarHeight`, so both sections' headers line up pixel-for-pixel), then
     /// content with the guide on it — fixes that.
     ///
-    /// `.contentTop`'s offset is `perControlTitleHeight`, not `0` — every *other* column in this bar
-    /// (Temp/Tint, Global/Shadows/Midtones/Highlights, Chr/Vib/Sat, Sharp/Dehaze) has its own small
-    /// `.caption` mini-title sitting above the actual control, which is exactly what
-    /// `perControlTitleHeight` skips past to land the guide on the control itself. `LUT3DPresetMenu`
-    /// used to be the one column with no such mini-title — its own label ("Choose LUT…") *is* the
-    /// control, with no caption above it — so this used to guide on `d[.top]` (0) instead, on the
-    /// theory that with nothing to skip, 0 was the right offset. It wasn't: `LUT3DPresetMenu`'s
-    /// `Menu`-based label still carries its own internal top inset (padding plus the control's own
-    /// native menu chrome, `.menuStyle(.borderlessButton)` notwithstanding) that a bare `Text` never
-    /// has, so its *visible* content still sat measurably below Sharp/Dehaze's, Temp/Tint's, etc. —
-    /// this column just didn't have a mini-title tall enough to absorb it. Adding one (`"LUT"`,
-    /// below) both fixes the leftover gap and brings this column in line with every other column's
-    /// own visual structure instead of being the sole exception.
+    /// No "LUT" mini-title above the list anymore — the list itself starts where every other
+    /// column's mini-title sits (`.contentTop` still offset by `perControlTitleHeight`) and runs
+    /// the full `perControlTitleHeight + colorFaderTrackHeight`, so it spans the bar's whole
+    /// height instead of a short 3-4 row box. The Intensity knob, when a LUT is loaded, takes its
+    /// natural height at the bottom and the list gets the rest.
     private var lut3DSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
@@ -691,9 +576,6 @@ struct ColorBalanceBarView: View {
             .frame(height: colorZonesToolbarHeight)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("LUT")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 LUT3DPresetMenu(
                     currentTitle: stage.lut3DTitle,
                     onSelect: { entry in applyLUT(entry) }
@@ -714,6 +596,7 @@ struct ColorBalanceBarView: View {
                     }
                 }
             }
+            .frame(height: perControlTitleHeight + colorFaderTrackHeight, alignment: .top)
             .alignmentGuide(.contentTop) { d in d[.top] + perControlTitleHeight }
         }
         .frame(width: 180)

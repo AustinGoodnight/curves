@@ -24,6 +24,7 @@ struct EditorSidebarView: View {
     let coordinator: EditorRenderCoordinator
     let history: EditHistory
     @Environment(ColorSchemeStore.self) private var uiColors
+    @AppStorage(AppSettingsKey.developerMode) private var developerMode = false
 
     /// Purely local UI state, not persisted: reopening the editor always starts closed, since
     /// "most of the time I leave it at default" was the whole reason for hiding these behind a
@@ -92,28 +93,65 @@ struct EditorSidebarView: View {
                         ticks: [-0.5, -0.25, 0, 0.25, 0.5], trackStyle: .hairline, thumbShape: .diamond
                     )
                 }
+                // Same recessed rounded box as the Balance/Detail knob rows further down.
+                .padding(.horizontal, 12)
+                .padding(.vertical, 16)
+                .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
+                // Developer Mode only — photo-aware Exposure and White Balance candidates from
+                // `ImageAwareControls.swift`, bound to the real fields and fed live render data, so
+                // they can be judged on actual photos.
+                if developerMode {
+                    devComparisonPanel("Exposure Styles") {
+                        styleOption("A · Clip-Warning Ends") {
+                            ExposureClipEndsSlider(
+                                value: exposureBinding, range: -4...4,
+                                resetValue: coordinator.renderer.defaultExposure, stats: coordinator.toneStats
+                            )
+                        }
+                        styleOption("B · Histogram Track") {
+                            ExposureHistogramTrack(
+                                value: exposureBinding, range: -4...4, resetValue: coordinator.renderer.defaultExposure,
+                                histogram: coordinator.luminanceHistogram, stats: coordinator.toneStats
+                            )
+                        }
+                        styleOption("C · Scrub + Sparkline") {
+                            ExposureScrubSparkline(
+                                value: exposureBinding, range: -4...4, resetValue: coordinator.renderer.defaultExposure,
+                                histogram: coordinator.luminanceHistogram, stats: coordinator.toneStats
+                            )
+                        }
+                    }
+                    devComparisonPanel("White Balance Styles") {
+                        styleOption("A · As-Shot Marker") {
+                            WhiteBalanceAsShotSliders(
+                                temperature: temperatureBinding, tint: tintBinding,
+                                asShotTemperature: coordinator.renderer.defaultNeutralTemperature,
+                                asShotTint: coordinator.renderer.defaultNeutralTint
+                            )
+                        }
+                        styleOption("B · Cast Meter") {
+                            WhiteBalanceCastMeter(
+                                temperature: temperatureBinding, tint: tintBinding,
+                                asShotTemperature: coordinator.renderer.defaultNeutralTemperature,
+                                asShotTint: coordinator.renderer.defaultNeutralTint,
+                                stats: coordinator.toneStats
+                            )
+                        }
+                    }
+                }
                 // Filmic and AgX are alternative tone mappers for the same pipeline slot (see
-                // `RawImageRenderer.applyStage(_:to:)`), so a 3-way segmented picker replaces what
+                // `RawImageRenderer.applyStage(_:to:)`), so a single 3-way picker replaces what
                 // used to be Filmic's own bespoke on/off button — "choose one of the other" reads
-                // more honestly as a single picker than two independently-toggleable rows that
-                // happen to fight over the same slot. The chevron popover pattern is unchanged
+                // more honestly as one picker than two independently-toggleable rows that happen
+                // to fight over the same slot. The picker is `ToneMapperCurveCarousel` (chosen from
+                // the Developer Mode comparison of `ToneMapperPickerStyles.swift`) — the selected
+                // mode's tone curve, with ‹ › to step between them. The chevron popover pattern is unchanged
                 // (same "hide it, most of the time I leave it at default" reasoning as before),
                 // just showing whichever module's sliders match the current picker selection.
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
-                        Picker("Tone Mapper", selection: Binding(
-                            get: { toneMapper(for: stage) },
-                            set: { newValue in
-                                setToneMapper(stage, to: newValue)
-                                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
-                            }
-                        )) {
-                            Text("Off").tag(ToneMapper.off)
-                            Text("Filmic").tag(ToneMapper.filmic)
-                            Text("AgX").tag(ToneMapper.agx)
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
+                        // No background of its own — this row's recessed fill below is the box.
+                        ToneMapperCurveCarousel(selection: toneMapperBinding, drawsBackground: false)
 
                         if toneMapper(for: stage) != .off {
                             Button {
@@ -210,10 +248,23 @@ struct EditorSidebarView: View {
                 }
                 // `uiColors.recessedTrackBackground` — the same fixed dark fill every slider track
                 // and the Curve graph use, so this row reads as one more recessed panel in the same
-                // family instead of its own, differently-styled control. The segmented `Picker`
+                // family instead of its own, differently-styled control. The carousel
                 // itself carries the on/off/which-module signal now, so there's no separate
                 // foreground-color toggle state to apply to the row as a whole.
                 .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
+                // Developer Mode only — every candidate visualization from
+                // `ToneMapperPickerStyles.swift`, all live and bound to the same selection, so one
+                // can be picked. (Also shown in the Component Gallery.)
+                if developerMode {
+                    devComparisonPanel("Tone Mapper Styles") {
+                        styleOption("1 · Sliding Pill") { ToneMapperSlidingPill(selection: toneMapperBinding) }
+                        styleOption("2 · Curve Tiles") { ToneMapperCurveTiles(selection: toneMapperBinding) }
+                        styleOption("3 · Rolloff Strips") { ToneMapperRolloffStrips(selection: toneMapperBinding) }
+                        styleOption("4 · Underline Tabs") { ToneMapperUnderlineTabs(selection: toneMapperBinding) }
+                        styleOption("5 · Stoplight Dots") { ToneMapperStoplightDots(selection: toneMapperBinding) }
+                        styleOption("6 · Curve Carousel") { ToneMapperCurveCarousel(selection: toneMapperBinding) }
+                    }
+                }
                 VStack(alignment: .leading, spacing: 10) {
                     // Three independent regions, same technique as `ColorBalanceBarView.colorZonesSection`'s
                     // own header — "Curve" + reset pinned leading, "Preserve Color" truly centered on the
@@ -274,6 +325,79 @@ struct EditorSidebarView: View {
                         "Black Lift Precise", value: stageBind(\.editRGBCurveBlackLift, fallback: 0, module: rgbCurveGate),
                         range: 0...0.15, resetValue: 0, ticks: [0, 0.05, 0.1, 0.15]
                     )
+                    // The Balance knobs sit in a recessed rounded box — same fill and corner radius
+                    // as the Tone Mapper picker row above, spanning the sidebar's width, with a bit
+                    // more internal padding so the knobs don't crowd its edges.
+                    // Balance (Chroma/Vibrance/Saturation) — moved here from `ColorBalanceBarView`'s
+                    // bottom bar as a row of knobs matching the Detail row below. All three read on a
+                    // signed −100…+100 scale (Chroma/Vibrance's native ±0.5 × 200). No on/off switch:
+                    // `balanceGate` keeps `editBalanceEnabled` synced to whether any has an adjustment,
+                    // and `colorBalanceGate` does the same for Color Balance RGB's outer switch.
+                    HStack(alignment: .top, spacing: 0) {
+                        knob(
+                            "Chroma", value: stageBind(
+                                \.editColorBalanceChromaGlobal, fallback: 0, module: balanceGate, masterModule: colorBalanceGate
+                            ),
+                            range: -0.5...0.5, resetValue: 0, valueText: { signedText($0 * 200) }
+                        )
+                        knob(
+                            "Vibrance", value: stageBind(
+                                \.editColorBalanceVibrance, fallback: 0, module: balanceGate, masterModule: colorBalanceGate
+                            ),
+                            range: -0.5...0.5, resetValue: 0, valueText: { signedText($0 * 200) }
+                        )
+                        knob(
+                            "Saturation", value: stageBind(
+                                \.editFilmicSaturation, fallback: FilmicRGBParameters.darktableDefault.saturation,
+                                module: balanceGate, masterModule: colorBalanceGate
+                            ),
+                            range: -100...100, resetValue: FilmicRGBParameters.darktableDefault.saturation,
+                            valueText: { signedText($0) }
+                        )
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity)
+                    .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.top, 4)
+                    // Detail (Sharp/Dehaze/Denoise) and Lens Correction — moved here from
+                    // `ColorBalanceBarView`'s bottom bar, as one row of the same `KnobControl` the Film
+                    // Simulation section uses for LUT Intensity, each with its name and percentage
+                    // underneath. No on/off switches: `detailGate` keeps `editDetailEnabled` synced to
+                    // whether any of the three has an adjustment, and Lens at 0 turns
+                    // `editLensCorrectionEnabled` off (anything above 0 turns it back on, so a disabled
+                    // photo reads as 0). Sharpness is a native `CIRAWFilter` input, so it's only shown
+                    // when the renderer supports it.
+                    HStack(alignment: .top, spacing: 0) {
+                        if coordinator.isReady && coordinator.renderer.isSharpnessSupported {
+                            knob(
+                                "Sharpness", value: bind(
+                                    \.editSharpnessAmount, fallback: coordinator.renderer.defaultSharpnessAmount, module: detailGate
+                                ),
+                                resetValue: coordinator.renderer.defaultSharpnessAmount
+                            )
+                        }
+                        knob("Dehaze", value: stageBind(\.editDehazeAmount, fallback: 0, module: detailGate), resetValue: 0)
+                        knob("Denoise", value: bind(\.editDenoiseAmount, fallback: 0, module: detailGate), resetValue: 0)
+                        knob(
+                            "Lens", value: Binding(
+                                get: { asset.editLensCorrectionEnabled ? (asset.editLensCorrectionIntensity ?? 1) : 0 },
+                                set: { newValue in
+                                    asset.editLensCorrectionEnabled = newValue > 0
+                                    asset.editLensCorrectionIntensity = newValue
+                                    scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+                                }
+                            ),
+                            resetValue: 1
+                        )
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity)
+                    .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
+                    // Same 14pt gap (the VStack's 10 + 4) as between Black Lift Precise and the
+                    // Balance box above.
+                    .padding(.top, 4)
                 }
             }
             .padding()
@@ -283,11 +407,99 @@ struct EditorSidebarView: View {
         .disabled(!coordinator.isReady)
     }
 
-    private func bind(_ keyPath: ReferenceWritableKeyPath<PhotoAsset, Double?>, fallback: Double) -> Binding<Double> {
+    /// One `KnobControl` column — knob on top with its value readout centered inside the dial, name
+    /// centered below. Each column takes an equal share
+    /// of the row's width, so however many knobs are shown spread evenly across it. `valueText`
+    /// defaults to a 0–100% readout for the 0...1 Detail/Lens knobs.
+    private func knob(
+        _ title: String, value: Binding<Double>, range: ClosedRange<Double> = 0...1, resetValue: Double,
+        valueText: ((Double) -> String)? = nil
+    ) -> some View {
+        VStack(spacing: 6) {
+            KnobControl(value: value, range: range, resetValue: resetValue)
+                // The readout sits inside the dial, centered, in a quiet grey so it reads as a
+                // label on the dial rather than competing with it. `allowsHitTesting(false)` so a
+                // drag starting on the number still reaches the knob underneath.
+                .overlay {
+                    Text(valueText?(value.wrappedValue) ?? String(format: "%.0f%%", value.wrappedValue * 100))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .allowsHitTesting(false)
+                }
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Signed whole-number readout ("+12", "0", "−30") for the Balance knobs, scaled so all three
+    /// read on the same −100…+100 range.
+    private func signedText(_ value: Double) -> String {
+        let rounded = Int(value.rounded())
+        return rounded > 0 ? "+\(rounded)" : "\(rounded)"
+    }
+
+    /// The Off/Filmic/AgX selection — shared by the segmented `Picker` and every candidate style in
+    /// the "Tone Mapper Styles" comparison panel.
+    private var toneMapperBinding: Binding<ToneMapper> {
+        Binding(
+            get: { toneMapper(for: stage) },
+            set: { newValue in
+                setToneMapper(stage, to: newValue)
+                scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+            }
+        )
+    }
+
+    /// A Developer Mode comparison panel — dashed outline so it reads as "not part of the real UI".
+    private func devComparisonPanel<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionTitle(title, enabled: nil)
+            content()
+        }
+        .padding(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                .foregroundStyle(Color.white.opacity(0.2))
+        )
+    }
+
+    /// One labeled candidate inside a `devComparisonPanel`.
+    private func styleOption<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            content()
+        }
+    }
+
+    private var exposureBinding: Binding<Double> {
+        bind(\.editExposure, fallback: coordinator.renderer.defaultExposure)
+    }
+
+    private var temperatureBinding: Binding<Double> {
+        bind(\.editNeutralTemperature, fallback: coordinator.renderer.defaultNeutralTemperature, module: whiteBalanceGate)
+    }
+
+    private var tintBinding: Binding<Double> {
+        bind(\.editNeutralTint, fallback: coordinator.renderer.defaultNeutralTint, module: whiteBalanceGate)
+    }
+
+    /// `module`, when passed, keeps that module's own bypass switch synced — same as `stageBind`.
+    private func bind(
+        _ keyPath: ReferenceWritableKeyPath<PhotoAsset, Double?>, fallback: Double, module: ModuleGate? = nil
+    ) -> Binding<Double> {
         Binding(
             get: { asset[keyPath: keyPath] ?? fallback },
             set: { newValue in
+                let hadAdjustments = module?.hasAdjustments()
                 asset[keyPath: keyPath] = newValue
+                if let module, let hadAdjustments {
+                    syncModuleEnabled(module, hadAdjustments: hadAdjustments)
+                }
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
         )
@@ -295,16 +507,24 @@ struct EditorSidebarView: View {
 
     /// `module`, when passed, keeps that module's own bypass switch synced to whether it still has
     /// adjustments after this particular field's write — see `syncModuleEnabled`'s doc comment.
+    /// `masterModule`, when passed, is synced in addition to `module` — see
+    /// `ColorBalanceBarView.stageBind`'s doc comment (the Balance knobs need both their own inner
+    /// switch and Color Balance RGB's outer one kept in sync).
     private func stageBind(
-        _ keyPath: ReferenceWritableKeyPath<Stage, Double?>, fallback: Double, module: ModuleGate? = nil
+        _ keyPath: ReferenceWritableKeyPath<Stage, Double?>, fallback: Double, module: ModuleGate? = nil,
+        masterModule: ModuleGate? = nil
     ) -> Binding<Double> {
         Binding(
             get: { stage[keyPath: keyPath] ?? fallback },
             set: { newValue in
                 let hadAdjustments = module?.hasAdjustments()
+                let hadMasterAdjustments = masterModule?.hasAdjustments()
                 stage[keyPath: keyPath] = newValue
                 if let module, let hadAdjustments {
                     syncModuleEnabled(module, hadAdjustments: hadAdjustments)
+                }
+                if let masterModule, let hadMasterAdjustments {
+                    syncModuleEnabled(masterModule, hadAdjustments: hadMasterAdjustments)
                 }
                 scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
             }
@@ -325,6 +545,21 @@ struct EditorSidebarView: View {
 
     private var agxGate: ModuleGate {
         ModuleGate(hasAdjustments: { agxHasAdjustments(stage) }, setEnabled: { stage.editAgXEnabled = $0 })
+    }
+
+    private var balanceGate: ModuleGate {
+        ModuleGate(hasAdjustments: { balanceGroupHasAdjustments(stage) }, setEnabled: { stage.editBalanceEnabled = $0 })
+    }
+
+    private var whiteBalanceGate: ModuleGate {
+        ModuleGate(hasAdjustments: { whiteBalanceHasAdjustments(asset) }, setEnabled: { asset.editWhiteBalanceEnabled = $0 })
+    }
+
+    private var detailGate: ModuleGate {
+        ModuleGate(
+            hasAdjustments: { detailHasAdjustments(asset: asset, stage: stage) },
+            setEnabled: { asset.editDetailEnabled = $0 }
+        )
     }
 
     private var rgbCurveGate: ModuleGate {

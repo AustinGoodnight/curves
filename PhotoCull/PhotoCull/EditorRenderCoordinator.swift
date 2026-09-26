@@ -20,6 +20,8 @@ final class EditorRenderCoordinator {
     private(set) var hueHistogram: [Float] = []
     private(set) var rgbHistogram = RGBHistogramData()
     private(set) var colorDensity: [Float] = []
+    /// Clipping fractions and mean color of the current render — see `ImageToneStats`.
+    private(set) var toneStats = ImageToneStats()
     private(set) var isReady = false
 
     /// Called with a freshly-rendered, non-draft preview whenever one finishes — `EditorView` uses
@@ -184,12 +186,14 @@ final class EditorRenderCoordinator {
             // reasonable sample count instead of getting noisier for the same total budget.
             let rgb = Histogram.rgbChannels(from: image, bins: 192, maxSamples: 120_000)
             let density = Histogram.colorDensity(from: image)
+            let stats = Histogram.toneStats(from: image)
             await MainActor.run { [weak self] in
                 guard let self, generation == self.histogramGeneration else { return }
                 self.luminanceHistogram = luminance
                 self.hueHistogram = hue
                 self.rgbHistogram = rgb
                 self.colorDensity = density
+                self.toneStats = stats
             }
         }
     }

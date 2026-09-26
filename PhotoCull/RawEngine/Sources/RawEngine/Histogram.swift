@@ -18,6 +18,31 @@ public struct RGBHistogramData: Sendable {
     }
 }
 
+/// Whole-image summary numbers the histograms can't provide — every histogram here is normalized
+/// to its own tallest bin, which throws away "what fraction of pixels" and so can't answer "how
+/// much is clipped?" or "what's the average color?". Computed from the same subsampled pixels.
+public struct ImageToneStats: Sendable, Equatable {
+    /// Fraction (0...1) of sampled pixels with every channel at/near 0 — crushed to pure black.
+    public var shadowClipFraction: Float
+    /// Fraction (0...1) of sampled pixels with any channel at/near 255 — blown highlights.
+    public var highlightClipFraction: Float
+    /// Mean of each channel, 0...1 — the image's overall color cast.
+    public var meanRed: Float
+    public var meanGreen: Float
+    public var meanBlue: Float
+
+    public init(
+        shadowClipFraction: Float = 0, highlightClipFraction: Float = 0,
+        meanRed: Float = 0.5, meanGreen: Float = 0.5, meanBlue: Float = 0.5
+    ) {
+        self.shadowClipFraction = shadowClipFraction
+        self.highlightClipFraction = highlightClipFraction
+        self.meanRed = meanRed
+        self.meanGreen = meanGreen
+        self.meanBlue = meanBlue
+    }
+}
+
 /// Histogram computation for curve-editor backdrops (RGB Curve's luminance histogram, Color
 /// Zones' per-hue histogram). Not a darktable port — there's no single module this corresponds
 /// to; darktable's own curve/colorzones GUIs draw comparable backdrops, but each computes it
@@ -112,6 +137,30 @@ public enum Histogram {
             counts[hueBin * chromaBins + chromaBin] += 1
         }
         return normalized(counts)
+    }
+
+    /// Clipping fractions and mean color — see `ImageToneStats`. Sampled like every other function
+    /// here (downscaled draw), so a clipped region smaller than a sample cell gets averaged down
+    /// and under-counted; fine for a "how much is clipped" indicator, not a pixel-exact count.
+    public static func toneStats(from image: CGImage, maxSamples: Int = 40_000) -> ImageToneStats {
+        guard let pixels = sampledRGBA(from: image, maxSamples: maxSamples) else { return ImageToneStats() }
+        let pixelCount = pixels.count / 4
+        guard pixelCount > 0 else { return ImageToneStats() }
+        var shadows = 0, highlights = 0
+        var sumR = 0, sumG = 0, sumB = 0
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
+            sumR += r
+            sumG += g
+            sumB += b
+            if r >= 254 || g >= 254 || b >= 254 { highlights += 1 }
+            if r <= 1 && g <= 1 && b <= 1 { shadows += 1 }
+        }
+        let n = Float(pixelCount)
+        return ImageToneStats(
+            shadowClipFraction: Float(shadows) / n, highlightClipFraction: Float(highlights) / n,
+            meanRed: Float(sumR) / n / 255, meanGreen: Float(sumG) / n / 255, meanBlue: Float(sumB) / n / 255
+        )
     }
 
     private static func normalized(_ counts: [Float]) -> [Float] {
