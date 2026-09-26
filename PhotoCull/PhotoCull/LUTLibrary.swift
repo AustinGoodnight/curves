@@ -8,7 +8,7 @@ struct LUTLibraryEntry: Identifiable, Hashable {
     let id: String
     /// The relative path minus `.cube` — just the file name for top-level files, `"Kodak/Portra
     /// 400"` for ones in subfolders, so same-named files in different subfolders stay distinct.
-    /// Also what's copied onto `Stage.lut3DTitle` when applied, which is what `LUT3DPresetMenu`
+    /// Also what's copied onto `Stage.lut3DTitle` when applied, which is what `FilmSimulationPicker`/`LUTBrowserSidebar`
     /// compares against to highlight the selected row.
     let name: String
     let url: URL

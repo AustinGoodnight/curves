@@ -68,6 +68,13 @@ struct EditorView: View {
     /// a hand-painted mask instead of Vision's click-to-select; both write the same
     /// `asset.objectRemovalData` list.
     @State private var paintedFillEditing = false
+    /// White-balance eyedropper mode — toggled by the button in `ColorBalanceBarView`'s WB group;
+    /// while on, a click on the main preview calls `pickWhiteBalance(at:)`.
+    @State private var isPickingWhiteBalance = false
+    /// Film Simulation browser — while on, the right sidebar shows `LUTBrowserSidebar` instead of
+    /// its usual controls. Toggled by the Browse button in `ColorBalanceBarView`'s Film Simulation
+    /// header; closed from the browser itself.
+    @State private var isBrowsingLUTs = false
     /// Which of `previewBackgroundPalette` the preview pane's backdrop currently shows — purely a
     /// viewing aid (checking how the image reads against different surrounds), not part of the
     /// edit itself, so this is plain local `@State`, not persisted or threaded into `scheduleRender`.
@@ -87,6 +94,29 @@ struct EditorView: View {
     /// A direct `CIImage(contentsOf:)` decode, mirroring `RawImageRenderer.load(url:)`'s own
     /// standard-image fallback, is what actually guarantees that.
     @State private var jpgPreviewImage: CGImage?
+
+    /// Sets Temp/Tint so the spot under `point` (normalized to the displayed, post-crop preview,
+    /// origin top-left) renders neutral — solved by `CIRAWFilter` itself via `WhiteBalancePicker`,
+    /// off the main thread since it opens the RAW. Clamped to the WB faders' own ranges. Beeps and
+    /// changes nothing for a non-RAW file (no camera white balance to solve).
+    private func pickWhiteBalance(at point: CGPoint) {
+        isPickingWhiteBalance = false
+        let url = asset.resolvedURL()
+        let crop = cropParameters(for: asset)
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                WhiteBalancePicker.neutralWhiteBalance(url: url, displayPoint: point, crop: crop)
+            }.value
+            guard let result else {
+                NSSound.beep()
+                return
+            }
+            asset.editNeutralTemperature = min(max(result.temperature, 2000), 12000)
+            asset.editNeutralTint = min(max(result.tint, -150), 150)
+            asset.editWhiteBalanceEnabled = true
+            scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
+        }
+    }
 
     init(asset: PhotoAsset, onSelectAsset: @escaping (PhotoAsset) -> Void) {
         self.asset = asset
@@ -220,8 +250,30 @@ struct EditorView: View {
                             .padding(.bottom, 16)
                         }
                     } else if let previewImage = coordinator.previewImage {
-                        ZoomableImagePane(previewImage: previewImage, onZoomChange: { coordinator.updateZoomResolution(scale: $0) })
-                            .id(asset.filePath)
+                        ZoomableImagePane(
+                            previewImage: previewImage,
+                            onZoomChange: { coordinator.updateZoomResolution(scale: $0) },
+                            onPickPoint: isPickingWhiteBalance ? { pickWhiteBalance(at: $0) } : nil
+                        )
+                        .id(asset.filePath)
+                        .overlay(alignment: .bottom) {
+                            if isPickingWhiteBalance {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "eyedropper")
+                                    Text("Click something white or neutral grey")
+                                        .font(.caption.weight(.semibold))
+                                    Button("Cancel") { isPickingWhiteBalance = false }
+                                        .buttonStyle(.plain)
+                                        .fontWeight(.semibold)
+                                        .keyboardShortcut(.cancelAction)
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                .padding(.bottom, 16)
+                            }
+                        }
                     } else {
                         ProgressView("Decoding RAW…")
                             .tint(.white)
@@ -232,7 +284,10 @@ struct EditorView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(alignment: .top) { previewOverlayToolbar }
 
-                EditorSidebarView(asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator, history: history)
+                EditorSidebarView(
+                    asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator, history: history,
+                    isBrowsingLUTs: $isBrowsingLUTs
+                )
             }
 
             // The `HSplitView` above and `ColorBalanceBarView` below both sit on the same
@@ -244,7 +299,8 @@ struct EditorView: View {
 
             ColorBalanceBarView(
                 asset: asset, stage: selectedStage, activeStages: activeStages, coordinator: coordinator, history: history,
-                wheelDiameter: wheelDiameter
+                wheelDiameter: wheelDiameter, isPickingWhiteBalance: $isPickingWhiteBalance,
+                isBrowsingLUTs: $isBrowsingLUTs
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -409,6 +465,10 @@ private struct ZoomableImagePane: View {
     /// full native resolution (see `jpgPreviewImage`'s doc comment), so it has no `onZoomChange`
     /// to wire up and passes nothing here.
     var onZoomChange: ((CGFloat) -> Void)? = nil
+    /// Set while a click should pick a point instead of just panning — currently the white-balance
+    /// eyedropper. Receives the clicked point normalized to the displayed image (0...1, origin
+    /// top-left), accounting for the current zoom/pan. Clicks outside the image are ignored.
+    var onPickPoint: ((CGPoint) -> Void)? = nil
 
     @State private var zoomScale: CGFloat = 1
     @State private var panOffset: CGSize = .zero
@@ -471,6 +531,25 @@ private struct ZoomableImagePane: View {
                 // comment for why.
                 MagnifyCatcher { delta, location in
                     setZoom(zoomScale * (1 + delta), anchor: location, baseFitRect: baseFitRect, containerSize: geometry.size)
+                }
+
+                if let onPickPoint {
+                    // Topmost while picking, so the click lands here rather than starting a pan;
+                    // crosshair cursor so the mode is obvious.
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onHover { inside in
+                            if inside { NSCursor.crosshair.push() } else { NSCursor.pop() }
+                        }
+                        .onDisappear { NSCursor.pop() }
+                        .gesture(SpatialTapGesture().onEnded { tap in
+                            let rect = zoomedFitRect(baseFitRect: baseFitRect)
+                            guard rect.width > 0, rect.height > 0, rect.contains(tap.location) else { return }
+                            onPickPoint(CGPoint(
+                                x: (tap.location.x - rect.minX) / rect.width,
+                                y: (tap.location.y - rect.minY) / rect.height
+                            ))
+                        })
                 }
 
                 if zoomScale > minZoom + 0.01 {

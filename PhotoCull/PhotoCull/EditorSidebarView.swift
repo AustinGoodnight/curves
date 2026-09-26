@@ -23,8 +23,13 @@ struct EditorSidebarView: View {
     let activeStages: [Stage]
     let coordinator: EditorRenderCoordinator
     let history: EditHistory
+    /// When on, this whole sidebar shows `LUTBrowserSidebar` instead of its controls.
+    @Binding var isBrowsingLUTs: Bool
     @Environment(ColorSchemeStore.self) private var uiColors
     @AppStorage(AppSettingsKey.developerMode) private var developerMode = false
+    /// Thumbnail renders for the Developer Mode "Film Simulation Styles" concepts — only ever
+    /// populated while that panel is on screen.
+    @State private var lutPreviewStore = LUTPreviewStore()
 
     /// Purely local UI state, not persisted: reopening the editor always starts closed, since
     /// "most of the time I leave it at default" was the whole reason for hiding these behind a
@@ -49,7 +54,17 @@ struct EditorSidebarView: View {
         // `geo.size.width` directly has no such lag: it's live for every layout pass, including
         // mid-drag on `HSplitView`'s divider.
         GeometryReader { geo in
-            sidebarContent(width: geo.size.width)
+            if isBrowsingLUTs {
+                LUTBrowserSidebar(
+                    actions: lutActions,
+                    onRefresh: { prepareLUTPreviews() },
+                    onClose: { isBrowsingLUTs = false }
+                )
+                .onAppear { prepareLUTPreviews() }
+                .onChange(of: asset.filePath) { _, _ in prepareLUTPreviews() }
+            } else {
+                sidebarContent(width: geo.size.width)
+            }
         }
         .frame(minWidth: 320, idealWidth: 420, maxWidth: 640)
     }
@@ -73,30 +88,25 @@ struct EditorSidebarView: View {
                         .frame(maxWidth: .infinity)
                 }
                 // Exposure (native `CIRAWFilter` input, asset-level) and Contrast (a Color
-                // Balance RGB field, per-stage) share one section despite coming from different
-                // params — both are basic tone controls. No section title (each `slider(...)`
-                // already carries its own name, and a section header reading "Exposure" right
-                // above a slider *also* labeled "Exposure" was a redundant duplicate, not a
-                // meaningful group label). Chroma/Vibrance, Color Balance RGB's other two "plain
-                // slider" fields, stayed in `ColorBalanceBarView`'s `colorBalanceSection` instead
-                // (vertical faders next to the wheels) since those read as color controls, not tone.
+                // Balance RGB field, per-stage) sit together despite coming from different params —
+                // both are basic tone controls.
                 section(nil) {
                     // `trackStyle: .hairline, thumbShape: .diamond` — the "Hairline · Diamond"
                     // style picked from the comparison row below, now live on the real controls.
                     slider(
-                        "Exposure", value: bind(\.editExposure, fallback: coordinator.renderer.defaultExposure),
+                        "Exposure", value: exposureBinding,
                         range: -4...4, resetValue: coordinator.renderer.defaultExposure,
                         ticks: [-4, -3, -2, -1, 0, 1, 2, 3, 4], trackStyle: .hairline, thumbShape: .diamond
                     )
-                    slider(
-                        "Contrast", value: stageBind(\.editColorBalanceContrast, fallback: 0, module: colorBalanceGate), range: -0.5...0.5,
-                        ticks: [-0.5, -0.25, 0, 0.25, 0.5], trackStyle: .hairline, thumbShape: .diamond
+                    // Contrast's "Ramp Mapping" visualization (from the Developer Mode comparison in
+                    // `ImageAwareControls.swift`), without its gradient ramps — just the lines
+                    // joining each tone to where contrast moves it, pivoting on middle grey — plus
+                    // this photo's own darkest/brightest tones, which also move with Exposure.
+                    ContrastRampMapping(
+                        value: contrastBinding, showsRamps: false,
+                        histogram: coordinator.luminanceHistogram, stats: coordinator.toneStats
                     )
                 }
-                // Same recessed rounded box as the Balance/Detail knob rows further down.
-                .padding(.horizontal, 12)
-                .padding(.vertical, 16)
-                .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
                 // Developer Mode only — photo-aware Exposure and White Balance candidates from
                 // `ImageAwareControls.swift`, bound to the real fields and fed live render data, so
                 // they can be judged on actual photos.
@@ -121,6 +131,45 @@ struct EditorSidebarView: View {
                             )
                         }
                     }
+                    devComparisonPanel("Contrast Styles") {
+                        styleOption("A · Pivot Line (drag up/down, ⇧ = fine)") {
+                            ContrastPivotGraph(value: contrastBinding, histogram: coordinator.luminanceHistogram)
+                        }
+                        styleOption("B · Tone Spread") {
+                            ContrastToneSpread(value: contrastBinding, histogram: coordinator.luminanceHistogram)
+                        }
+                        styleOption("C · Ramp Mapping") {
+                            ContrastRampMapping(value: contrastBinding)
+                        }
+                    }
+                    devComparisonPanel("Film Simulation Styles") {
+                        HStack {
+                            Text("Previews use a snapshot of this photo without its LUT.")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                            Button {
+                                prepareLUTPreviews()
+                            } label: {
+                                Label("Refresh", systemImage: "arrow.clockwise").font(.caption2)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                        }
+                        styleOption("1 · Contact Sheet") { LUTContactSheet(actions: lutActions) }
+                        styleOption("2 · Hover Preview List (hover = preview on photo, click = keep)") {
+                            LUTHoverPreviewList(actions: lutActions)
+                        }
+                        styleOption("3 · Filmstrip + Strength") { LUTFilmstripStrength(actions: lutActions) }
+                        styleOption("4 · Crossfade A ⟷ B") { LUTCrossfade(actions: lutActions) }
+                        styleOption("5 · Blend Pad (x = A↔B, y = strength)") { LUTBlendPad(actions: lutActions) }
+                        styleOption("6 · Split Compare") { LUTSplitCompare(actions: lutActions) }
+                        styleOption("7 · Film Roll Shuffle (drag / ‹ › to shuffle; the middle roll loads)") {
+                            LUTFilmRollShuffle(actions: lutActions)
+                        }
+                    }
+                    .onAppear { prepareLUTPreviews() }
+                    .onChange(of: asset.filePath) { _, _ in prepareLUTPreviews() }
                     devComparisonPanel("White Balance Styles") {
                         styleOption("A · As-Shot Marker") {
                             WhiteBalanceAsShotSliders(
@@ -148,6 +197,8 @@ struct EditorSidebarView: View {
                 // mode's tone curve, with ‹ › to step between them. The chevron popover pattern is unchanged
                 // (same "hide it, most of the time I leave it at default" reasoning as before),
                 // just showing whichever module's sliders match the current picker selection.
+                VStack(alignment: .leading, spacing: 8) {
+                sectionTitle("Tone Mapping", enabled: nil)
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
                         // No background of its own — this row's recessed fill below is the box.
@@ -252,6 +303,7 @@ struct EditorSidebarView: View {
                 // itself carries the on/off/which-module signal now, so there's no separate
                 // foreground-color toggle state to apply to the row as a whole.
                 .background(uiColors.recessedTrackBackground, in: RoundedRectangle(cornerRadius: 8))
+                }
                 // Developer Mode only — every candidate visualization from
                 // `ToneMapperPickerStyles.swift`, all live and bound to the same selection, so one
                 // can be picked. (Also shown in the Component Gallery.)
@@ -476,8 +528,28 @@ struct EditorSidebarView: View {
         }
     }
 
+    private var lutActions: LUTConceptActions {
+        LUTConceptActions(
+            asset: asset, stage: stage, activeStages: activeStages, coordinator: coordinator,
+            history: history, store: lutPreviewStore
+        )
+    }
+
+    /// (Re)renders the no-LUT base image the Film Simulation concepts preview against.
+    private func prepareLUTPreviews() {
+        lutPreviewStore.prepareBase(
+            url: asset.resolvedURL(),
+            baseParams: rawBaseParameters(for: asset),
+            stageStack: activeStages.map { stageParameters(for: $0, detailEnabled: asset.editDetailEnabled) }
+        )
+    }
+
     private var exposureBinding: Binding<Double> {
         bind(\.editExposure, fallback: coordinator.renderer.defaultExposure)
+    }
+
+    private var contrastBinding: Binding<Double> {
+        stageBind(\.editColorBalanceContrast, fallback: 0, module: colorBalanceGate)
     }
 
     private var temperatureBinding: Binding<Double> {

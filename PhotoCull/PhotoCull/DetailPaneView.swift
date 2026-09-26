@@ -517,6 +517,32 @@ struct FileTypeFilterControl: View {
 /// `ContentView`'s `onChange(of: detailStore.editingAsset)` keeps `gridMode` synced to whether the
 /// editor is open, tapping "Sessions" while editing is what closes the editor now (no separate
 /// "Done" button).
+/// "Dev" in the title bar — flips Developer Mode (Settings › Developer) without opening Settings.
+/// Its own `View` type holding the `@AppStorage`, so toggling it only re-renders this button, never
+/// `ContentView.body` (see this project's CLAUDE.md on state living on the wrong view). Flat
+/// caption text like its RAW/JPG/Stack/Scene neighbors; accent-colored while on.
+struct DeveloperModeToolbarToggle: View {
+    @AppStorage(AppSettingsKey.developerMode) private var developerMode = false
+    @Environment(ColorSchemeStore.self) private var uiColors
+
+    var body: some View {
+        Button {
+            developerMode.toggle()
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "hammer")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("Dev")
+                    .font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(developerMode ? uiColors.accentColor : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(developerMode ? "Developer Mode is on — design comparison panels are showing" : "Turn on Developer Mode")
+        .padding(.trailing, 12)
+    }
+}
+
 struct ModeSwitcherControl: View {
     @Bindable var store: DetailStore
 

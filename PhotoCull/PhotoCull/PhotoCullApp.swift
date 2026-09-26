@@ -15,6 +15,12 @@ import PhotoCatalog
 /// specifically because this app's whole palette (`Color+Workspace.swift`) is a fixed dark theme,
 /// not one that's meant to adapt to Light Mode.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Before any window exists, so even the first scroll views get the app's own scroll bars —
+    /// see `ThemedScroller`.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        ThemedScrollers.install()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
         registerBundledFonts()

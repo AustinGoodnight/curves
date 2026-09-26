@@ -4,7 +4,7 @@ import PhotoCatalog
 
 /// The reusable-preset library, listed below the Stages edit tree in `StagesSidebarView`. A genuine
 /// separate `View` type (not inline in `StagesSidebarView.body`) — same isolation reasoning as
-/// `LUT3DPresetMenu`: this is the one place with its own `@Query`, and SwiftData's broad
+/// `FilmSimulationPicker`: this is the one place with its own `@Query`, and SwiftData's broad
 /// change-tracking means saving/renaming/deleting *any* `Preset` is enough to re-invoke a `body`
 /// that reads the query, so scoping that to this small section keeps it from also re-diffing the
 /// stage list, Versions, and History sections above it.

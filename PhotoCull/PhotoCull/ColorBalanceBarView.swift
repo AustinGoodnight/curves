@@ -43,6 +43,12 @@ struct ColorBalanceBarView: View {
     let coordinator: EditorRenderCoordinator
     let history: EditHistory
     let wheelDiameter: CGFloat
+    /// Owned by `EditorView` (its image pane is what receives the click) — the WB group's
+    /// eyedropper button just turns picking on/off. See `EditorView.pickWhiteBalance(at:)`.
+    @Binding var isPickingWhiteBalance: Bool
+    /// Owned by `EditorView` — the Film Simulation header's Browse button opens `LUTBrowserSidebar`
+    /// in place of the right sidebar's controls.
+    @Binding var isBrowsingLUTs: Bool
 
     @Environment(ColorSchemeStore.self) private var uiColors
 
@@ -125,6 +131,7 @@ struct ColorBalanceBarView: View {
     private var colorBalanceSection: some View {
         HStack(alignment: .top, spacing: 28) {
             titledGroup("WB", enabled: assetBoolBind(\.editWhiteBalanceEnabled)) {
+                HStack(alignment: .top, spacing: 16) {
                 switch whiteBalanceStyle {
                 case .classic:
                     HStack(alignment: .top, spacing: 20) {
@@ -159,6 +166,8 @@ struct ColorBalanceBarView: View {
                         temperatureText: "\(Int((asset.editNeutralTemperature ?? coordinator.renderer.defaultNeutralTemperature).rounded()))K",
                         tintText: formattedTint(asset.editNeutralTint ?? coordinator.renderer.defaultNeutralTint)
                     )
+                }
+                whiteBalanceTools
                 }
             }
             .contextMenu {
@@ -364,6 +373,28 @@ struct ColorBalanceBarView: View {
         )
     }
 
+    /// Beside Temp/Tint: the eyedropper (click something white/grey in the photo to neutralize it)
+    /// and the live color-cast readout of the current render (`WhiteBalanceCastIndicator`).
+    private var whiteBalanceTools: some View {
+        VStack(spacing: 12) {
+            Button {
+                isPickingWhiteBalance.toggle()
+            } label: {
+                Image(systemName: "eyedropper")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isPickingWhiteBalance ? Color.primary : Color.secondary)
+                    .frame(width: 56, height: 26)
+                    .background(
+                        isPickingWhiteBalance ? uiColors.accentColor.opacity(0.45) : uiColors.recessedTrackBackground,
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+            }
+            .buttonStyle(.plain)
+            .help("Pick a white or neutral grey in the photo to set white balance")
+            WhiteBalanceCastIndicator(coordinator: coordinator)
+        }
+    }
+
     private var whiteBalanceGate: ModuleGate {
         ModuleGate(hasAdjustments: { whiteBalanceHasAdjustments(asset) }, setEnabled: { asset.editWhiteBalanceEnabled = $0 })
     }
@@ -538,7 +569,7 @@ struct ColorBalanceBarView: View {
         }
     }
 
-    /// A LUT picker (`LUT3DPresetMenu`) + intensity slider, sibling to `colorBalanceSection`/
+    /// A LUT picker (`FilmSimulationPicker` — film roll + ‹ › stepping) + intensity knob, sibling to `colorBalanceSection`/
     /// `colorZonesSection` — "film simulation" is a color-grading tool same as those two, just one
     /// that composites last (see `StageParameters.lut3D`'s doc comment).
     ///
@@ -568,6 +599,20 @@ struct ColorBalanceBarView: View {
                     resetLUT3D(stage)
                     scheduleRender(for: asset, activeStages: activeStages, coordinator: coordinator, history: history)
                 })
+                Button {
+                    isBrowsingLUTs.toggle()
+                } label: {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(isBrowsingLUTs ? Color.primary : Color.secondary)
+                        .frame(width: 20, height: 18)
+                        .background(
+                            isBrowsingLUTs ? uiColors.accentColor.opacity(0.45) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 4)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Browse film simulations with previews of this photo")
                 if stage.lut3DData != nil {
                     Spacer(minLength: 0)
                     StoplightToggle(isOn: stageBoolBind(\.editLUT3DEnabled))
@@ -576,8 +621,9 @@ struct ColorBalanceBarView: View {
             .frame(height: colorZonesToolbarHeight)
 
             VStack(alignment: .leading, spacing: 8) {
-                LUT3DPresetMenu(
+                FilmSimulationPicker(
                     currentTitle: stage.lut3DTitle,
+                    coordinator: coordinator,
                     onSelect: { entry in applyLUT(entry) }
                 )
                 if stage.lut3DData != nil {

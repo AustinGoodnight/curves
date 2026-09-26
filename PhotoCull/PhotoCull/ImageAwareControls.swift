@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import RawEngine
 
 /// Candidate controls that show what a setting is doing to *the photo that's open*, not just a
@@ -327,12 +328,96 @@ struct WhiteBalanceAsShotSliders: View {
     }
 }
 
+// MARK: - White Balance · Cast analysis (shared)
+
+/// The rendered photo's overall color cast, derived from `ImageToneStats`' mean color — warm(+)/
+/// cool(−) and green(+)/magenta(−) components, roughly −1...1. Doesn't claim the photo *should* be
+/// neutral (plenty shouldn't be — a sunset, a tungsten-lit room), just reports where it sits.
+private struct ColorCast {
+    let warm: Double
+    let green: Double
+    /// The mean color re-lit to a fixed mid brightness, so a dark photo's cast still reads.
+    let swatch: Color
+
+    init(_ stats: ImageToneStats) {
+        let r = Double(stats.meanRed), g = Double(stats.meanGreen), b = Double(stats.meanBlue)
+        let luma = max((r + g + b) / 3, 0.02)
+        warm = clamp((r - b) / luma * 1.5, -1...1)
+        green = clamp((g - (r + b) / 2) / luma * 3, -1...1)
+        let peak = max(r, g, b, 0.001)
+        swatch = Color(red: r / peak * 0.7, green: g / peak * 0.7, blue: b / peak * 0.7)
+    }
+
+    var description: String {
+        var parts: [String] = []
+        if abs(warm) > 0.08 { parts.append(warm > 0 ? "Warm" : "Cool") }
+        if abs(green) > 0.08 { parts.append(green > 0 ? "Green" : "Magenta") }
+        return parts.isEmpty ? "Neutral" : parts.joined(separator: " · ")
+    }
+}
+
+/// The cast plotted on a small warm/cool × green/magenta cross — a dot in the cast's own color,
+/// with a ring marking neutral center.
+private struct ColorCastPlot: View {
+    let cast: ColorCast
+    @Environment(ColorSchemeStore.self) private var uiColors
+
+    var body: some View {
+        GeometryReader { geo in
+            let size = geo.size
+            let dot = CGPoint(x: size.width / 2 * (1 + cast.warm * 0.85), y: size.height / 2 * (1 - cast.green * 0.85))
+            ZStack {
+                RoundedRectangle(cornerRadius: 8).fill(uiColors.recessedTrackBackground)
+                // Axis tints: cool ← → warm, green ↑ ↓ magenta.
+                LinearGradient(colors: [Color.blue.opacity(0.18), .clear, Color.orange.opacity(0.18)], startPoint: .leading, endPoint: .trailing)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                LinearGradient(colors: [Color.green.opacity(0.14), .clear, Color.pink.opacity(0.14)], startPoint: .top, endPoint: .bottom)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                Path { p in
+                    p.move(to: CGPoint(x: size.width / 2, y: 5)); p.addLine(to: CGPoint(x: size.width / 2, y: size.height - 5))
+                    p.move(to: CGPoint(x: 5, y: size.height / 2)); p.addLine(to: CGPoint(x: size.width - 5, y: size.height / 2))
+                }
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1).frame(width: 11, height: 11)
+                Circle()
+                    .fill(cast.swatch)
+                    .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
+                    .frame(width: 10, height: 10)
+                    .shadow(color: .black.opacity(0.4), radius: 1.5, y: 1)
+                    .position(dot)
+            }
+        }
+    }
+}
+
+/// The compact cast readout that sits beside Temp/Tint in `ColorBalanceBarView`'s WB group: cross
+/// plot plus a one-word description. Its own `View` reading `coordinator.toneStats` inside its own
+/// `body`, so a new render's stats only re-diff this little view, not the whole color bar.
+struct WhiteBalanceCastIndicator: View {
+    let coordinator: EditorRenderCoordinator
+    var plotSize: CGFloat = 56
+
+    var body: some View {
+        let cast = ColorCast(coordinator.toneStats)
+        VStack(spacing: 5) {
+            ColorCastPlot(cast: cast)
+                .frame(width: plotSize, height: plotSize)
+            Text(cast.description)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .help("Average color of the photo — the dot moves toward the center ring as it gets more neutral")
+        .animation(.easeOut(duration: 0.25), value: coordinator.toneStats)
+    }
+}
+
 // MARK: - White Balance B · Cast meter
 
-/// Reads the rendered photo's *average color* and plots its cast on a small warm/cool ×
-/// green/magenta cross, next to a swatch of that cast — as Temp/Tint move, the dot visibly heads
-/// toward (or away from) neutral center. Doesn't claim the photo *should* be neutral (plenty
-/// shouldn't be), just shows where it sits. Compact Temp/Tint sliders underneath do the adjusting.
+/// Reads the rendered photo's *average color* and plots its cast next to a swatch of that cast —
+/// as Temp/Tint move, the dot visibly heads toward (or away from) neutral center. Compact Temp/Tint
+/// sliders underneath do the adjusting.
 struct WhiteBalanceCastMeter: View {
     @Binding var temperature: Double
     @Binding var tint: Double
@@ -341,43 +426,21 @@ struct WhiteBalanceCastMeter: View {
     let stats: ImageToneStats
     var temperatureRange: ClosedRange<Double> = 2000...12000
     var tintRange: ClosedRange<Double> = -150...150
-    @Environment(ColorSchemeStore.self) private var uiColors
-
-    /// Warm(+)/cool(−) and green(+)/magenta(−) components of the mean color, roughly −1...1.
-    private var cast: (warm: Double, green: Double) {
-        let r = Double(stats.meanRed), g = Double(stats.meanGreen), b = Double(stats.meanBlue)
-        let luma = max((r + g + b) / 3, 0.02)
-        return (warm: clamp((r - b) / luma * 1.5, -1...1), green: clamp((g - (r + b) / 2) / luma * 3, -1...1))
-    }
-
-    /// The mean color re-lit to a fixed mid brightness, so a dark photo's cast still reads.
-    private var castSwatch: Color {
-        let r = Double(stats.meanRed), g = Double(stats.meanGreen), b = Double(stats.meanBlue)
-        let peak = max(r, g, b, 0.001)
-        return Color(red: r / peak * 0.7, green: g / peak * 0.7, blue: b / peak * 0.7)
-    }
-
-    private var castDescription: String {
-        let (warm, green) = cast
-        var parts: [String] = []
-        if abs(warm) > 0.08 { parts.append(warm > 0 ? "Warm" : "Cool") }
-        if abs(green) > 0.08 { parts.append(green > 0 ? "Green" : "Magenta") }
-        return parts.isEmpty ? "Neutral" : parts.joined(separator: " · ")
-    }
 
     var body: some View {
+        let cast = ColorCast(stats)
         VStack(spacing: 12) {
             HStack(spacing: 14) {
-                crossPlot.frame(width: 76, height: 76)
+                ColorCastPlot(cast: cast).frame(width: 76, height: 76)
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
-                        RoundedRectangle(cornerRadius: 4).fill(castSwatch).frame(width: 22, height: 22)
+                        RoundedRectangle(cornerRadius: 4).fill(cast.swatch).frame(width: 22, height: 22)
                         RoundedRectangle(cornerRadius: 4).fill(Color(white: 0.7)).frame(width: 22, height: 22)
                     }
                     Text("Photo average vs. neutral")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                    Text(castDescription)
+                    Text(cast.description)
                         .font(.caption.weight(.medium))
                 }
                 Spacer(minLength: 0)
@@ -387,32 +450,332 @@ struct WhiteBalanceCastMeter: View {
         }
         .animation(.easeOut(duration: 0.25), value: stats)
     }
+}
 
-    private var crossPlot: some View {
-        GeometryReader { geo in
-            let size = geo.size
-            let (warm, green) = cast
-            let dot = CGPoint(x: size.width / 2 * (1 + warm * 0.9), y: size.height / 2 * (1 - green * 0.9))
-            ZStack {
-                RoundedRectangle(cornerRadius: 8).fill(uiColors.recessedTrackBackground)
-                // Axis tints: cool ← → warm, magenta ↓ ↑ green.
-                LinearGradient(colors: [Color.blue.opacity(0.18), .clear, Color.orange.opacity(0.18)], startPoint: .leading, endPoint: .trailing)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                LinearGradient(colors: [Color.green.opacity(0.14), .clear, Color.pink.opacity(0.14)], startPoint: .top, endPoint: .bottom)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                Path { p in
-                    p.move(to: CGPoint(x: size.width / 2, y: 6)); p.addLine(to: CGPoint(x: size.width / 2, y: size.height - 6))
-                    p.move(to: CGPoint(x: 6, y: size.height / 2)); p.addLine(to: CGPoint(x: size.width - 6, y: size.height / 2))
+// MARK: - Contrast (shared math)
+
+/// Color Balance RGB's contrast, exactly as `ColorBalanceRGBProcessor` applies it: in linear
+/// luminance, `Y' = grey × (Y / grey)^(1 + contrast)` around the 18.45% grey fulcrum. In stops
+/// (log2 relative to grey) that's just a straight line through middle grey with slope
+/// `1 + contrast` — which is what every visualization below leans on.
+private let contrastGreyFulcrum = 0.1845
+
+private func applyContrast(linear y: Double, _ contrast: Double) -> Double {
+    y <= 0 ? 0 : contrastGreyFulcrum * pow(y / contrastGreyFulcrum, 1 + contrast)
+}
+
+/// Display ↔ linear, approximated as a plain 2.2 gamma — close enough to the preview's encoding
+/// for placing histogram bins and ramp stops; not used for any actual rendering.
+private func displayToLinear(_ v: Double) -> Double { pow(max(v, 0), 2.2) }
+private func linearToDisplay(_ v: Double) -> Double { pow(max(v, 0), 1 / 2.2) }
+
+private func signedValue(_ value: Double) -> String {
+    let text = String(format: "%.2f", value)
+    return value > 0.004 ? "+" + text : (value < -0.004 ? text : "0.00")
+}
+
+// MARK: - Contrast A · Pivot line
+
+/// Contrast drawn as what it literally is: a line through middle grey on a stops-in × stops-out
+/// graph, rotating steeper (more contrast) or flatter (less) around the grey pivot. The photo's
+/// own tones sit behind it as a histogram on the same stops axis, so you can see which tones get
+/// pushed apart or pulled together. Drag up/down on the graph to change it; double-click resets.
+struct ContrastPivotGraph: View {
+    @Binding var value: Double
+    var range: ClosedRange<Double> = -0.5...0.5
+    let histogram: [Float]
+    @Environment(ColorSchemeStore.self) private var uiColors
+    @State private var dragStart: Double?
+
+    /// Stops relative to middle grey shown on each axis.
+    private let evRange = -7.0...3.0
+
+    private func u(_ ev: Double) -> CGFloat { CGFloat((ev - evRange.lowerBound) / (evRange.upperBound - evRange.lowerBound)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ControlHeader(title: "Contrast", valueText: signedValue(value)) { EmptyView() }
+            GeometryReader { geo in
+                let w = geo.size.width
+                let h = geo.size.height
+                let pivot = CGPoint(x: u(0) * w, y: (1 - u(0)) * h)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8).fill(uiColors.recessedTrackBackground)
+                    histogramPath(width: w, height: h).fill(Color.white.opacity(0.12))
+                    // Stop gridlines.
+                    Path { p in
+                        for ev in stride(from: evRange.lowerBound + 1, to: evRange.upperBound, by: 1) {
+                            p.move(to: CGPoint(x: u(ev) * w, y: 0)); p.addLine(to: CGPoint(x: u(ev) * w, y: h))
+                        }
+                    }
+                    .stroke(Color.white.opacity(0.04), lineWidth: 1)
+                    // Identity (no contrast change).
+                    Path { p in p.move(to: CGPoint(x: 0, y: h)); p.addLine(to: CGPoint(x: w, y: 0)) }
+                        .stroke(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    // The contrast line: ev_out = (1 + c) × ev_in.
+                    Path { p in
+                        let slope = 1 + value
+                        p.move(to: CGPoint(x: 0, y: (1 - u(evRange.lowerBound * slope)) * h))
+                        p.addLine(to: CGPoint(x: w, y: (1 - u(evRange.upperBound * slope)) * h))
+                    }
+                    .stroke(uiColors.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    Circle()
+                        .fill(Color(white: 0.46))
+                        .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
+                        .frame(width: 10, height: 10)
+                        .position(pivot)
+                    Text("18% grey")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
+                        .position(x: pivot.x + 26, y: pivot.y + 10)
+                    Text(value > 0.004 ? "Punchier" : (value < -0.004 ? "Flatter" : ""))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(8)
                 }
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1).frame(width: 12, height: 12)
-                Circle()
-                    .fill(castSwatch)
-                    .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
-                    .frame(width: 11, height: 11)
-                    .shadow(color: .black.opacity(0.4), radius: 1.5, y: 1)
-                    .position(dot)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                    let start = dragStart ?? value
+                    dragStart = start
+                    let factor = NSEvent.modifierFlags.contains(.shift) ? 0.2 : 1
+                    value = clamp(start - Double(drag.translation.height / h) * factor, range)
+                }.onEnded { _ in dragStart = nil })
+                .onTapGesture(count: 2) { value = 0 }
             }
+            .frame(height: 130)
+        }
+    }
+
+    /// The display-referred luminance histogram re-plotted on the stops axis (bins below the
+    /// graph's darkest stop fall off the left edge).
+    private func histogramPath(width: CGFloat, height: CGFloat) -> Path {
+        Path { p in
+            guard histogram.count > 1 else { return }
+            var started = false
+            for (i, count) in histogram.enumerated() {
+                let display = (Double(i) + 0.5) / Double(histogram.count)
+                let ev = log2(max(displayToLinear(display), 1e-6) / contrastGreyFulcrum)
+                guard evRange.contains(ev) else { continue }
+                let x = u(ev) * width
+                let y = height - height * CGFloat(count) * 0.8
+                if !started {
+                    p.move(to: CGPoint(x: x, y: height))
+                    started = true
+                }
+                p.addLine(to: CGPoint(x: x, y: y))
+            }
+            if started {
+                p.addLine(to: CGPoint(x: width, y: height))
+                p.closeSubpath()
+            }
+        }
+    }
+}
+
+// MARK: - Contrast B · Tone spread
+
+/// Measures the photo: where the middle 90% of its tones actually sit (5th–95th percentile of the
+/// rendered luminance), drawn as a bracket over a black→white strip with the median marked. Drag
+/// contrast and watch the bracket widen or narrow on the real render. Answers "is this photo flat
+/// or punchy right now?" with data rather than by eye.
+struct ContrastToneSpread: View {
+    @Binding var value: Double
+    var range: ClosedRange<Double> = -0.5...0.5
+    let histogram: [Float]
+    @Environment(ColorSchemeStore.self) private var uiColors
+
+    private var percentiles: (low: Double, median: Double, high: Double)? {
+        let total = histogram.reduce(0, +)
+        guard histogram.count > 1, total > 0 else { return nil }
+        func percentile(_ q: Float) -> Double {
+            var running: Float = 0
+            for (i, count) in histogram.enumerated() {
+                running += count
+                if running / total >= q { return (Double(i) + 0.5) / Double(histogram.count) }
+            }
+            return 1
+        }
+        return (percentile(0.05), percentile(0.5), percentile(0.95))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            XBipolarSlider(title: "Contrast", value: $value, range: range)
+            GeometryReader { geo in
+                let w = geo.size.width
+                ZStack(alignment: .leading) {
+                    LinearGradient(colors: [.black, .white], startPoint: .leading, endPoint: .trailing)
+                        .frame(height: 8)
+                        .clipShape(Capsule())
+                        .opacity(0.55)
+                    if let p = percentiles {
+                        // Bracket over the middle 90%.
+                        Path { path in
+                            let x0 = p.low * w, x1 = p.high * w
+                            path.move(to: CGPoint(x: x0, y: 16)); path.addLine(to: CGPoint(x: x0, y: 4))
+                            path.addLine(to: CGPoint(x: x1, y: 4)); path.addLine(to: CGPoint(x: x1, y: 16))
+                        }
+                        .stroke(uiColors.accentColor, lineWidth: 1.5)
+                        Rectangle()
+                            .fill(.white)
+                            .frame(width: 2, height: 14)
+                            .offset(x: p.median * w - 1)
+                    }
+                }
+                .frame(height: 20)
+            }
+            .frame(height: 20)
+            if let p = percentiles {
+                Text("Middle 90% of tones span \(Int(((p.high - p.low) * 100).rounded()))% of the range")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: histogram)
+    }
+}
+
+// MARK: - Contrast C · Ramp mapping
+
+/// Two grey ramps — input on top, the same ramp through the current contrast on the bottom — with
+/// a line joining each tone to where it lands. Lines fanning outward from middle grey = tones
+/// being pushed apart (more contrast); converging = pulled together. The exact math, no photo
+/// needed, so it reads the same on every image.
+struct ContrastRampMapping: View {
+    @Binding var value: Double
+    var range: ClosedRange<Double> = -0.5...0.5
+    /// `false` drops the two grey gradient ramps and keeps only the connector lines (the editor
+    /// sidebar's variant) — the endpoints are then marked with small ticks instead.
+    var showsRamps = true
+    /// When given, the photo's own darkest and brightest tones are marked on the fan — measured
+    /// from the current render (0.5th/99.5th percentile of `histogram`), so they move with
+    /// Exposure as well as Contrast. The bottom end is where that tone lands now; the top end is
+    /// where it came from before contrast (the exact inverse of `applyContrast`). A marker turns
+    /// red/blue when `stats` says that end is clipping. Approximate where later modules (curve,
+    /// LUT) also reshape tones, since the histogram is of the finished render.
+    var histogram: [Float]? = nil
+    var stats: ImageToneStats? = nil
+    @Environment(ColorSchemeStore.self) private var uiColors
+
+    private func output(_ display: Double) -> Double {
+        min(max(linearToDisplay(applyContrast(linear: displayToLinear(display), value)), 0), 1)
+    }
+
+    /// Inverse of `output` — the pre-contrast tone that lands on `display`.
+    private func input(_ display: Double) -> Double {
+        let y = displayToLinear(display)
+        let pre = y <= 0 ? 0 : contrastGreyFulcrum * pow(y / contrastGreyFulcrum, 1 / (1 + value))
+        return min(max(linearToDisplay(pre), 0), 1)
+    }
+
+    /// The photo's darkest/brightest tones (display-referred, 0...1) in the current render.
+    private var tonalExtremes: (dark: Double, bright: Double)? {
+        guard let histogram, histogram.count > 1 else { return nil }
+        let total = histogram.reduce(0, +)
+        guard total > 0 else { return nil }
+        let n = Double(histogram.count)
+        var running: Float = 0
+        var dark = 0.0, bright = 1.0, foundDark = false
+        for (i, count) in histogram.enumerated() {
+            running += count
+            if !foundDark, running / total >= 0.005 { dark = Double(i) / n; foundDark = true }
+            if running / total >= 0.995 { bright = Double(i + 1) / n; break }
+        }
+        return (dark, bright)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ControlHeader(title: "Contrast", valueText: signedValue(value)) { EmptyView() }
+            GeometryReader { geo in
+                let w = geo.size.width
+                let rampHeight: CGFloat = 10
+                let gap = geo.size.height - rampHeight * 2
+                ZStack(alignment: .topLeading) {
+                    if showsRamps {
+                        LinearGradient(colors: [.black, .white], startPoint: .leading, endPoint: .trailing)
+                            .frame(height: rampHeight)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    } else {
+                        // Hairline baselines where the ramps would be, so the lines have ends.
+                        Rectangle().fill(Color.white.opacity(0.15)).frame(height: 1).offset(y: rampHeight - 1)
+                        Rectangle().fill(Color.white.opacity(0.15)).frame(height: 1).offset(y: rampHeight + gap)
+                    }
+                    Path { p in
+                        for i in 1..<16 {
+                            let t = Double(i) / 16
+                            p.move(to: CGPoint(x: t * w, y: rampHeight))
+                            p.addLine(to: CGPoint(x: output(t) * w, y: rampHeight + gap))
+                        }
+                    }
+                    .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                    // Middle grey's own connector, highlighted — it never moves.
+                    Path { p in
+                        let grey = linearToDisplay(contrastGreyFulcrum)
+                        p.move(to: CGPoint(x: grey * w, y: rampHeight))
+                        p.addLine(to: CGPoint(x: grey * w, y: rampHeight + gap))
+                    }
+                    .stroke(uiColors.accentColor, lineWidth: 1.5)
+                    if let extremes = tonalExtremes {
+                        extremeMarker(
+                            label: "darkest", bottom: extremes.dark, width: w, top: rampHeight, gap: gap,
+                            clipped: (stats?.shadowClipFraction ?? 0) > 0.005, clipColor: shadowClipColor, alignLeading: true
+                        )
+                        extremeMarker(
+                            label: "brightest", bottom: extremes.bright, width: w, top: rampHeight, gap: gap,
+                            clipped: (stats?.highlightClipFraction ?? 0) > 0.005, clipColor: highlightClipColor, alignLeading: false
+                        )
+                    }
+                    if showsRamps {
+                        LinearGradient(
+                            stops: (0...16).map { i in
+                                let t = Double(i) / 16
+                                return .init(color: Color(white: output(t)), location: t)
+                            },
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                        .frame(height: rampHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .offset(y: rampHeight + gap)
+                    }
+                }
+            }
+            .frame(height: 64)
+            .padding(.bottom, tonalExtremes == nil ? 0 : 10)
+            MinimalSlider(
+                value: $value, range: range, resetValue: 0,
+                ticks: [-0.5, -0.25, 0, 0.25, 0.5], trackStyle: .hairline, thumbShape: .diamond
+            )
+        }
+        .animation(.easeOut(duration: 0.2), value: histogram)
+    }
+
+    /// One highlighted connector for the photo's darkest or brightest tone: from where it sat
+    /// before contrast (top) to where it lands now (bottom), with end dots and a tiny label under
+    /// the bottom end. `clipped` recolors it (and relabels it) when that end is blowing/crushing.
+    private func extremeMarker(
+        label: String, bottom: Double, width w: CGFloat, top: CGFloat, gap: CGFloat,
+        clipped: Bool, clipColor: Color, alignLeading: Bool
+    ) -> some View {
+        let color = clipped ? clipColor : Color.white.opacity(0.9)
+        let topX = input(bottom) * w
+        let bottomX = bottom * w
+        return ZStack(alignment: .topLeading) {
+            Path { p in
+                p.move(to: CGPoint(x: topX, y: top))
+                p.addLine(to: CGPoint(x: bottomX, y: top + gap))
+            }
+            .stroke(color, lineWidth: 1.5)
+            Circle().fill(color).frame(width: 5, height: 5).offset(x: topX - 2.5, y: top - 2.5)
+            Circle().fill(color).frame(width: 7, height: 7).offset(x: bottomX - 3.5, y: top + gap - 3.5)
+            Text(clipped ? (alignLeading ? "crushed" : "clipped") : label)
+                .font(.system(size: 8))
+                .foregroundStyle(clipped ? color : Color.secondary)
+                .fixedSize()
+                .frame(width: 60, alignment: alignLeading ? .leading : .trailing)
+                .offset(x: alignLeading ? max(bottomX - 4, 0) : min(bottomX - 56, w - 60), y: top + gap + 6)
         }
     }
 }

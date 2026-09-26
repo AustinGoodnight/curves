@@ -5,7 +5,7 @@ import PhotoCatalog
 /// The "Copy from Recent" list, below "Stack"/"Presets" in `StagesSidebarView` — lets you pull
 /// another photo's current edit onto this one without having to save it as a named `Preset` first.
 /// A genuine separate `View` type (not inline in `StagesSidebarView.body`), same isolation reasoning
-/// as `PresetBrowserView`/`LUT3DPresetMenu`: this is the one place with its own `@Query`, and
+/// as `PresetBrowserView`/`FilmSimulationPicker`: this is the one place with its own `@Query`, and
 /// SwiftData's broad change-tracking means opening *any* photo in the editor (which touches
 /// `lastEditedDate`) is enough to re-invoke a `body` that reads the query, so scoping that to this
 /// small section keeps it from also re-diffing the stage list, Versions, and History sections above

@@ -647,7 +647,10 @@ struct ContentView: View {
         // sync, and clicking "Sessions" while editing is what closes the editor (there's no separate
         // "Done" button). Placed after the `if` above rather than gated with it, so it stays visible
         // in the same trailing position whether or not that block's own content is showing.
-        ToolbarItem(placement: .navigation) {
+        // Grouped with the Mode switcher (not its own top-level item) to stay under
+        // `@ToolbarContentBuilder`'s 10-child ceiling — see the Sync group's comment above.
+        ToolbarItemGroup(placement: .navigation) {
+            DeveloperModeToolbarToggle()
             ModeSwitcherControl(store: detailStore)
         }
     }
