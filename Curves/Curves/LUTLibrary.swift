@@ -22,7 +22,7 @@ struct LUTLibraryEntry: Identifiable, Hashable {
 /// `ColorBalanceBarView.applyLUT(_:)`, which copies the parsed cube onto the `Stage` exactly as
 /// before, so a stage keeps rendering its LUT even if the file later moves or is deleted.
 ///
-/// Shared app-wide via `.environment(_:)` from `PhotoCullApp`, same as `ColorSchemeStore`.
+/// Shared app-wide via `.environment(_:)` from `CurvesApp`, same as `ColorSchemeStore`.
 @Observable
 final class LUTLibrary {
     private(set) var folderURL: URL?

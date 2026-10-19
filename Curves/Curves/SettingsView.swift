@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The app's Settings window (`Settings { SettingsView() }` in `PhotoCullApp`) — opened via the
-/// standard macOS "PhotoCull > Settings…" menu item / Cmd-,.
+/// The app's Settings window (`Settings { SettingsView() }` in `CurvesApp`) — opened via the
+/// standard macOS "Curves > Settings…" menu item / Cmd-,.
 ///
 /// Laid out like the main window rather than as a stock grouped `Form`: a vertical list of panes
 /// on the left on `sidebarBackground` (same neutral rounded selection pill as `SidebarView`'s
@@ -59,7 +59,7 @@ struct SettingsView: View {
             .background(uiColors.workspaceBackground)
         }
         .frame(width: 680, height: 500)
-        // Same fixed dark palette as the main window (see `PhotoCullApp`'s `.preferredColorScheme`
+        // Same fixed dark palette as the main window (see `CurvesApp`'s `.preferredColorScheme`
         // comment) — without it this window's AppKit chrome follows the system appearance instead.
         .preferredColorScheme(.dark)
         .tint(uiColors.accentColor)

@@ -139,7 +139,7 @@ struct ContentView: View {
             // See `detailContent`'s doc comment for why the grid/editor/culling-view switch lives
             // in its own computed property rather than inline here.
             detailContent
-                .navigationTitle(detailStore.editingAsset?.fileName ?? selectedScene?.name ?? selectedSession?.name ?? "PhotoCull")
+                .navigationTitle(detailStore.editingAsset?.fileName ?? selectedScene?.name ?? selectedSession?.name ?? "Curves")
                 .toolbar { toolbarContent }
                 .toolbarBackground(uiColors.sidebarBackground, for: .windowToolbar)
                 .toolbarBackground(.visible, for: .windowToolbar)

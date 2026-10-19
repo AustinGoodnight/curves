@@ -3,7 +3,7 @@ import SwiftUI
 /// Live, user-customizable UI chrome colors — the sidebar/workspace backgrounds, the slider/curve
 /// "recessed groove" color, the app's own accent color (independent of the system Accent Color
 /// preference), and the 6 selectable swatches in `EditorView`'s preview-background palette.
-/// Injected once at the app root (`PhotoCullApp`) via `.environment(_:)` and read from wherever one
+/// Injected once at the app root (`CurvesApp`) via `.environment(_:)` and read from wherever one
 /// of those colors used to be a fixed `Color+Workspace.swift` constant. Swift's Observation
 /// framework scopes invalidation to whichever specific stored property a view's `body` actually
 /// reads, so a view reading only `colorScheme.accentColor` doesn't re-render when

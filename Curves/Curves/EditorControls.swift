@@ -6,7 +6,7 @@ import SwiftUI
 
 extension Font {
     /// The app's own brand face for UI chrome — registered for this process at launch
-    /// (`PhotoCullApp.AppDelegate.registerBundledFonts`) from a variable font (weight 200...800).
+    /// (`CurvesApp.AppDelegate.registerBundledFonts`) from a variable font (weight 200...800).
     /// Used for every module/section header (`sectionTitle`) so the editor's own chrome reads as a
     /// distinct type family from the system font. Unrelated to the toolbar wordmark (a static SVG
     /// built from a different face — see `ContentView.toolbarContent`'s `.principal` item) —

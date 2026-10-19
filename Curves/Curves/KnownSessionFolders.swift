@@ -22,14 +22,14 @@ struct KnownSessionFolderEntry: Codable {
 }
 
 /// A small file outside SwiftData listing every `Session`'s folder — `~/Library/Application
-/// Support/PhotoCull/knownSessionFolders.json`. Needed because a post-wipe, freshly-created
+/// Support/Curves/knownSessionFolders.json`. Needed because a post-wipe, freshly-created
 /// `ModelContainer` has zero `Session` rows by definition, so nothing *inside* SwiftData can tell
 /// `CacheRebuilder` which folders to rescan; this is that pointer, written every time a `Session` is
 /// created (see `ContentView`'s session-creation call sites) and read only during a rebuild.
 enum KnownSessionFolders {
     private static var fileURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return appSupport.appendingPathComponent("PhotoCull", isDirectory: true).appendingPathComponent("knownSessionFolders.json")
+        return appSupport.appendingPathComponent("Curves", isDirectory: true).appendingPathComponent("knownSessionFolders.json")
     }
 
     static func load() -> [KnownSessionFolderEntry] {

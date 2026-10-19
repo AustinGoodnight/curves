@@ -1,4 +1,4 @@
-name: PhotoCull
+name: Curves
 options:
   bundleIdPrefix: com.austingoodnight
   deploymentTarget:
@@ -10,12 +10,12 @@ packages:
   RawEngine:
     path: RawEngine
 targets:
-  PhotoCull:
+  Curves:
     type: application
     platform: macOS
     deploymentTarget: "14.0"
     sources:
-      - PhotoCull
+      - Curves
     dependencies:
       - package: PhotoCatalog
       - package: RawEngine
@@ -23,7 +23,7 @@ targets:
       base:
         PRODUCT_NAME: Curves
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        PRODUCT_BUNDLE_IDENTIFIER: com.austingoodnight.PhotoCull
+        PRODUCT_BUNDLE_IDENTIFIER: com.austingoodnight.Curves
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"

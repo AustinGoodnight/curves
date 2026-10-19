@@ -1,7 +1,7 @@
 #!/bin/zsh
-# Renders the website stills and control animations (see PhotoCull/MarketingExport.swift).
+# Renders the website stills and control animations (see Curves/MarketingExport.swift).
 #
-#   PhotoCull/Tools/export-marketing.sh [photo] [output dir]
+#   Curves/Tools/export-marketing.sh [photo] [output dir]
 #
 # photo       drives histograms/scopes/hue backdrops and the Detail close-up (default: falls.jpg)
 # output dir  default: <repo>/marketing-export
@@ -20,7 +20,7 @@ command -v ffmpeg >/dev/null || { echo "ffmpeg is required (brew install ffmpeg)
 
 echo "› Building Curves (Release)…"
 (cd "$ROOT" && xcodegen generate --quiet)
-xcodebuild -project "$ROOT/PhotoCull.xcodeproj" -scheme PhotoCull -configuration Release \
+xcodebuild -project "$ROOT/Curves.xcodeproj" -scheme Curves -configuration Release \
   -derivedDataPath "$DERIVED" build -quiet
 
 echo "› Rendering stills and encoding videos…"

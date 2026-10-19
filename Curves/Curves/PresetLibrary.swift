@@ -37,9 +37,9 @@ extension Preset {
 
 // MARK: - On-disk backup
 
-/// A JSON mirror of every `Preset`/`PresetFolder` at `~/Library/Application Support/PhotoCull/
+/// A JSON mirror of every `Preset`/`PresetFolder` at `~/Library/Application Support/Curves/
 /// presets.json`. Presets aren't photo edits, so they have no sidecar file next to any image —
-/// without this, the store-reset path in `PhotoCullApp` (which moves an incompatible store aside
+/// without this, the store-reset path in `CurvesApp` (which moves an incompatible store aside
 /// and rebuilds from sidecars, see `CacheRebuilder`) would silently lose every preset. Same shape
 /// and location as `KnownSessionFolders`: rewritten in full after every preset mutation
 /// (`PresetBackup.write(context:)`), read back only when the store has no presets at all.
@@ -77,7 +77,7 @@ enum PresetBackup {
 
     private static var fileURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return appSupport.appendingPathComponent("PhotoCull", isDirectory: true).appendingPathComponent("presets.json")
+        return appSupport.appendingPathComponent("Curves", isDirectory: true).appendingPathComponent("presets.json")
     }
 
     /// Saves `context` first so the fetch below reflects just-made inserts *and* deletes, then
@@ -104,7 +104,7 @@ enum PresetBackup {
         try? data.write(to: fileURL, options: .atomic)
     }
 
-    /// Called once at launch from `PhotoCullApp.sharedModelContainer`. When the store holds no
+    /// Called once at launch from `CurvesApp.sharedModelContainer`. When the store holds no
     /// presets or folders at all (a freshly-reset store), repopulates them from the backup file;
     /// otherwise refreshes the backup from the store, so a library that predates this backup gets
     /// one immediately rather than only after its next preset edit. Deleting every preset also

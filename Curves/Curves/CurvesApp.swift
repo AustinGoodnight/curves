@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct PhotoCullApp: App {
+struct CurvesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     /// Live, user-customizable UI chrome colors (Settings' "Appearance" section) — created once
     /// here and shared with the whole app via `.environment(_:)` below, rather than per-window,
