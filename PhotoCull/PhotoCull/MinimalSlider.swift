@@ -27,7 +27,7 @@ struct MinimalSlider: View {
     /// on the Exposure slider. Empty (the default) draws nothing; values outside `range` are
     /// skipped rather than clamped into view. `0`, if present, draws taller/brighter than the
     /// rest, same "zero reads as neutral" convention the vertical faders/wheels use elsewhere
-    /// (`XYWhiteBalanceControl`'s dashed crosshair, `ColorWheelControl`'s arc fill origin).
+    /// (`WhiteBalancePad`'s dashed crosshair, `ColorWheelControl`'s arc fill origin).
     var ticks: [Double] = []
     /// `.capsule` (default) is this control's long-standing look — see the struct doc comment,
     /// still used by every slider that hasn't opted into `.hairline`. `.hairline` is Exposure/

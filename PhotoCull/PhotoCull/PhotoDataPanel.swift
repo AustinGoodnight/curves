@@ -32,7 +32,7 @@ struct PhotoDataPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            scopeSelector
+            PhotoDataScopeSelector(scope: $scope)
             Group {
                 switch scope {
                 case .histogram:
@@ -59,13 +59,17 @@ struct PhotoDataPanel: View {
     }
 }
 
-extension PhotoDataPanel {
-    /// One lit dot + label per view, spread across the panel's width — the same "which one is on"
-    /// dot language as `StoplightToggle` (accent + soft glow when lit, grey when not), used here as
-    /// a one-of-four radio group instead of the old pill tabs.
-    fileprivate var scopeSelector: some View {
+/// One lit dot + label per view, spread across the panel's width — the same "which one is on"
+/// dot language as `StoplightToggle` (accent + soft glow when lit, grey when not), used here as
+/// a one-of-four radio group instead of the old pill tabs. Its own type (rather than a property
+/// on `PhotoDataPanel`) so `MarketingExport` can draw the same selector over sample data.
+struct PhotoDataScopeSelector: View {
+    @Binding var scope: PhotoDataPanel.Scope
+    @Environment(ColorSchemeStore.self) private var uiColors
+
+    var body: some View {
         HStack(spacing: 0) {
-            ForEach(Scope.allCases) { item in
+            ForEach(PhotoDataPanel.Scope.allCases) { item in
                 let isSelected = scope == item
                 HStack(spacing: 6) {
                     Circle()
@@ -103,7 +107,7 @@ extension PhotoDataPanel.Scope {
 
 // MARK: - Waveform
 
-private struct WaveformScope: View {
+struct WaveformScope: View {
     let image: CGImage?
     let height: CGFloat
     @Environment(ColorSchemeStore.self) private var uiColors
@@ -142,7 +146,7 @@ private struct WaveformScope: View {
 
 // MARK: - Vectorscope
 
-private struct VectorscopeView: View {
+struct VectorscopeView: View {
     let image: CGImage?
     let height: CGFloat
     @Environment(ColorSchemeStore.self) private var uiColors
@@ -215,7 +219,7 @@ private struct VectorscopeView: View {
 
 // MARK: - Zones
 
-private struct ZoneSystemView: View {
+struct ZoneSystemView: View {
     let histogram: [Float]
     let height: CGFloat
     @Environment(ColorSchemeStore.self) private var uiColors

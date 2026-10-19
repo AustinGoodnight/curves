@@ -10,3 +10,6 @@ PhotoCull/PhotoCull.xcodeproj/
 
 # graphify tool output
 graphify-out/
+
+# Marketing renders (PhotoCull/Tools/export-marketing.sh)
+marketing-export/

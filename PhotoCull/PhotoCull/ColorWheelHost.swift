@@ -21,6 +21,9 @@ struct ColorWheelHost: View, Equatable {
     var maxChroma: Double = 0.5
     var yRange: ClosedRange<Double> = -1...1
     var diameter: CGFloat = 92
+    var style: ColorWheelStyle = .spectrum
+    var isEnabled: Bool = true
+    var onEnabledChange: (Bool) -> Void = { _ in }
     var onHueChange: (Double) -> Void
     var onChromaChange: (Double) -> Void
     var onLuminanceChange: (Double) -> Void
@@ -28,6 +31,7 @@ struct ColorWheelHost: View, Equatable {
     static func == (lhs: ColorWheelHost, rhs: ColorWheelHost) -> Bool {
         lhs.title == rhs.title && lhs.hue == rhs.hue && lhs.chroma == rhs.chroma && lhs.luminance == rhs.luminance
             && lhs.maxChroma == rhs.maxChroma && lhs.yRange == rhs.yRange && lhs.diameter == rhs.diameter
+            && lhs.style == rhs.style && lhs.isEnabled == rhs.isEnabled
     }
 
     var body: some View {
@@ -38,7 +42,9 @@ struct ColorWheelHost: View, Equatable {
             luminance: Binding(get: { luminance }, set: onLuminanceChange),
             maxChroma: maxChroma,
             luminanceRange: yRange,
-            diameter: diameter
+            diameter: diameter,
+            style: style,
+            isEnabled: Binding(get: { isEnabled }, set: onEnabledChange)
         )
     }
 }

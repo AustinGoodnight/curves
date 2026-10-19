@@ -22,7 +22,7 @@ extension Color {
     /// The shared saturation/brightness every hue-based control background in `ColorBalanceBarView`
     /// (the 4 color wheels' arcs, Color Zones' hue-axis strip, the WB/Chr/Vib/Sat gradient faders,
     /// the XY white balance pad) is normalized onto via `normalizedVividness(_:)` below — matches
-    /// `CurveEditorControl.hueSpectrum`'s existing level, already proven at Color Zones' scale.
+    /// the level Color Zones' hue axis used before it moved to `WheelPalette`.
     /// Before this existed, each control picked its own colors independently: the wheels used raw
     /// `Color(hue:saturation: 1, brightness: 1)`, Color Zones used 0.85/0.95, and the linear faders/
     /// XY pad used literal Apple system-color RGB triples — whose *own* saturation/brightness varies

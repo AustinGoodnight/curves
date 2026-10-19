@@ -44,10 +44,10 @@ struct CurveEditorControl: View {
     /// same [0, 1] domain as the curve itself, so a luminance or hue histogram lines up directly
     /// under the points that affect that range.
     var histogram: [Float]? = nil
-    /// Tints the graph's own background with a full-saturation hue spectrum — Color Zones' x-axis
-    /// *is* hue (0...1 mapping to 0°...360°), so this lets the user see which colors a given
-    /// x-position actually affects instead of reading it off the numeric axis. RGB Curve's x-axis
-    /// is input tone, not hue, so this stays off there.
+    /// Color Zones' x-axis *is* hue (0...1 mapping to 0°...360° of Lab hue): draws a hue stripe
+    /// along the no-op line plus a hue tint wherever the curve departs from it (see
+    /// `hueTintFill`), so you can see which colors each x-position affects. RGB Curve's x-axis is
+    /// input tone, not hue, so this stays off there.
     var showHueAxis: Bool = false
     /// Hides the title / "click to add a point" hint / per-curve reset row — for call sites that
     /// already show their own title and reset elsewhere (Color Zones folds its reset into the
@@ -70,6 +70,10 @@ struct CurveEditorControl: View {
     /// since its curve sits over a plain hue-spectrum background with nothing else to judge
     /// position against.
     var showGrid: Bool = false
+    /// How the hue axis is drawn when `showHueAxis` is on — see `HueGraphStyle`.
+    var hueStyle: HueGraphStyle = .centerStripe
+    /// What's behind the hue-axis graph — see `HueGraphBackground`. RGB Curve ignores it.
+    var hueBackground: HueGraphBackground = .recessed
     var onChange: () -> Void = {}
 
     /// Minimum x-separation enforced between adjacent points, in curve-space [0, 1] — prevents
@@ -90,6 +94,12 @@ struct CurveEditorControl: View {
     /// position) tracking — same "compute from the previous event, not the gesture's start"
     /// technique `MinimalSlider`'s Shift-fine-drag and friends use elsewhere in this app.
     @State private var previousEndpointDragY: CGFloat? = nil
+    /// The free-dragged (circle) point's sorted index while it's being dragged — drives its
+    /// enlarged accent-colored look.
+    @State private var draggingPointIndex: Int? = nil
+    /// Draws a drag in progress on this sorted point index without a real gesture — for
+    /// `MarketingExport`'s scripted interaction videos. `nil` (the default) in the app.
+    var presentedDragIndex: Int? = nil
     @Environment(ColorSchemeStore.self) private var uiColors
 
     var body: some View {
@@ -132,12 +142,24 @@ struct CurveEditorControl: View {
                         if !showHueAxis {
                             histogramBars(width: width)
                         }
-                        if showGrid {
+                        if showHueAxis {
+                            hueBackgroundDecoration(width: width)
+                        } else if showGrid {
                             gridLines(width: width)
                         }
-                        referenceLines(width: width)
+                        if showHueAxis {
+                            hueLayers(width: width)
+                        } else {
+                            referenceLines(width: width)
+                        }
                         endpointDragGuide(width: width)
-                        curveStroke(width: width)
+                        if showHueAxis && hueStyle == .tintedLine {
+                            curveStroke(width: width, style: AnyShapeStyle(
+                                LinearGradient(colors: WheelPalette.colorZonesColors, startPoint: .leading, endPoint: .trailing)
+                            ), lineWidth: 2.5)
+                        } else {
+                            curveStroke(width: width)
+                        }
                         addPointLayer(width: width)
                     }
                     .background(graphBackground)
@@ -145,7 +167,7 @@ struct CurveEditorControl: View {
                     // Same `uiColors.recessedTrackBackground` used above and by
                     // `MinimalSlider`/`VerticalCircleSlider`'s own track, reused here as the
                     // border stroke instead of a plain `Color.primary`-based line.
-                    .overlay(graphClipShape.stroke(uiColors.recessedTrackBackground, lineWidth: 1))
+                    .overlay(graphClipShape.stroke(graphBorderColor, lineWidth: 1))
 
                     ForEach(sortedPoints.indices, id: \.self) { i in
                         pointHandle(at: i, width: width)
@@ -154,8 +176,10 @@ struct CurveEditorControl: View {
             }
             .frame(height: height)
 
-            if showHueAxis {
-                hueAxisStrip
+            if showHueAxis && hueStyle == .original {
+                LinearGradient(colors: Self.hueSpectrum, startPoint: .leading, endPoint: .trailing)
+                    .frame(height: 6)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
             }
         }
     }
@@ -166,34 +190,223 @@ struct CurveEditorControl: View {
             : AnyShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    /// Full-hue spectrum, both ends red — hue wraps at 0°/360°, so a `LinearGradient` with matching
-    /// colors at x = 0 and x = 1 reads correctly against the graph's own [0, 1] domain.
-    /// `Color.controlSpectrumSaturation`/`.controlSpectrumBrightness` — same vividness every other
-    /// spectrum control in the bottom bar renders at (the color wheels' arcs, WB/Chr/Vib/Sat, the
-    /// XY pad); this was the level the others were normalized to match, not the other way around.
-    private static let hueSpectrum: [Color] = stride(from: 0.0, through: 1.0, by: 1.0 / 12.0)
-        .map { Color(hue: $0, saturation: Color.controlSpectrumSaturation, brightness: Color.controlSpectrumBrightness) }
-
-    /// Color Zones gets the spectrum; RGB Curve gets `uiColors.recessedTrackBackground` — the same
-    /// fixed opaque fill `MinimalSlider`/`VerticalCircleSlider` use for their own track background
-    /// and this graph's own border stroke below. See that color's own doc comment for why it's a
-    /// flat absolute color rather than a translucent black — this `Group` and the sliders don't
-    /// sit on the same backdrop, so a translucent overlay rendered visibly different final colors
-    /// on each despite being the same nominal opacity.
+    /// Color Zones: the graph sits on the same dark recessed fill as RGB Curve, and color only
+    /// appears in two places — a hue stripe along the no-op line (as wide as the color wheels'
+    /// ring, so the two read as one family), and a tint between the curve and that line wherever
+    /// the curve actually boosts or cuts, like the wheels' tint glow. Hues come from
+    /// `WheelPalette.colorZonesAxis`, i.e. the Lab hue the kernel really selects at each x.
     @ViewBuilder
     private var graphBackground: some View {
-        if showHueAxis {
+        if showHueAxis && hueStyle == .original {
             LinearGradient(colors: Self.hueSpectrum, startPoint: .leading, endPoint: .trailing)
                 .opacity(0.55)
+        } else if showHueAxis {
+            switch hueBackground {
+            case .recessed: uiColors.recessedTrackBackground
+            case .sunken: Color.black.opacity(0.45)
+            case .outline, .borderless, .cornerMarks, .hueLanes: Color.clear
+            }
         } else {
             uiColors.recessedTrackBackground
         }
     }
 
-    private var hueAxisStrip: some View {
-        LinearGradient(colors: Self.hueSpectrum, startPoint: .leading, endPoint: .trailing)
-            .frame(height: 6)
-            .clipShape(RoundedRectangle(cornerRadius: 3))
+    private var graphBorderColor: Color {
+        guard showHueAxis else { return uiColors.recessedTrackBackground }
+        switch hueBackground {
+        case .recessed: return uiColors.recessedTrackBackground
+        case .outline: return Color.white.opacity(0.12)
+        case .sunken: return Color.white.opacity(0.06)
+        case .borderless, .cornerMarks, .hueLanes: return .clear
+        }
+    }
+
+    /// Grid/structure drawn over each `HueGraphBackground` — lighter or replaced where the box is
+    /// gone, since a full grid floating in open space reads as the box again.
+    @ViewBuilder
+    private func hueBackgroundDecoration(width: CGFloat) -> some View {
+        switch hueBackground {
+        case .recessed, .sunken:
+            if showGrid { gridLines(width: width) }
+        case .outline:
+            if showGrid { dotGrid(width: width) }
+        case .borderless:
+            // Short ticks at the quarter marks along the top and bottom edges only.
+            Path { path in
+                for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                    let x = min(max(CGFloat(fraction) * width, 0.5), width - 0.5)
+                    path.move(to: CGPoint(x: x, y: 0)); path.addLine(to: CGPoint(x: x, y: 5))
+                    path.move(to: CGPoint(x: x, y: height - 5)); path.addLine(to: CGPoint(x: x, y: height))
+                }
+            }
+            .stroke(Color.white.opacity(0.25), lineWidth: 1)
+            .allowsHitTesting(false)
+        case .cornerMarks:
+            dotGrid(width: width)
+            Canvas { context, _ in
+                // Crop-mark brackets at the four corners, over the dot grid.
+                let arm: CGFloat = 10
+                var corners = Path()
+                for (x, y, dx, dy) in [(0.5, 0.5, 1.0, 1.0), (width - 0.5, 0.5, -1.0, 1.0), (0.5, height - 0.5, 1.0, -1.0), (width - 0.5, height - 0.5, -1.0, -1.0)] {
+                    corners.move(to: CGPoint(x: x + arm * dx, y: y)); corners.addLine(to: CGPoint(x: x, y: y)); corners.addLine(to: CGPoint(x: x, y: y + arm * dy))
+                }
+                context.stroke(corners, with: .color(.white.opacity(0.3)), lineWidth: 1)
+            }
+            .allowsHitTesting(false)
+        case .hueLanes:
+            // Six faint alternating columns, one per primary/secondary hue family (split at the
+            // Lab hues between R/Y/G/C/B/M), each labeled at the top — structure from the axis's
+            // own meaning instead of a neutral grid.
+            let bounds: [Double] = [0, 0.13, 0.25, 0.42, 0.62, 0.8, 0.92, 1]
+            let letters = ["R", "Y", "G", "C", "B", "M", "R"]
+            ZStack(alignment: .topLeading) {
+                ForEach(0..<7, id: \.self) { i in
+                    let x0 = CGFloat(bounds[i]) * width, x1 = CGFloat(bounds[i + 1]) * width
+                    Rectangle()
+                        .fill(Color.white.opacity(i.isMultiple(of: 2) ? 0.035 : 0))
+                        .frame(width: x1 - x0, height: height)
+                        .offset(x: x0)
+                    Text(letters[i])
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: x1 - x0)
+                        .offset(x: x0, y: 4)
+                }
+            }
+            .frame(width: width, height: height, alignment: .topLeading)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Dots at every eighth-intersection — a lighter stand-in for `gridLines` on the box-less/
+    /// outline-only backgrounds, where full lines read as a filled box again.
+    private func dotGrid(width: CGFloat) -> some View {
+        Canvas { context, _ in
+            for i in 1..<8 {
+                for j in 1..<8 {
+                    let p = CGPoint(x: CGFloat(i) / 8 * width, y: CGFloat(j) / 8 * height)
+                    context.fill(Path(ellipseIn: CGRect(x: p.x - 0.75, y: p.y - 0.75, width: 1.5, height: 1.5)), with: .color(.white.opacity(0.18)))
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// `.original`'s plain HSB spectrum — kept only so the old look stays comparable. Note it
+    /// doesn't match the Lab hue the kernel actually selects at each x (see `HueGraphStyle`).
+    private static let hueSpectrum: [Color] = stride(from: 0.0, through: 1.0, by: 1.0 / 12.0)
+        .map { Color(hue: $0, saturation: Color.controlSpectrumSaturation, brightness: Color.controlSpectrumBrightness) }
+
+    /// Per-style hue decoration, drawn under the curve stroke.
+    @ViewBuilder
+    private func hueLayers(width: CGFloat) -> some View {
+        switch hueStyle {
+        case .original:
+            referenceLines(width: width)
+        case .centerStripe:
+            hueTintFill(width: width)
+            hueCenterStripe(width: width)
+        case .tintedLine:
+            referenceLines(width: width)
+            hueBottomStrip(width: width)
+        case .eqBars:
+            referenceLines(width: width)
+            hueEQBars(width: width)
+            hueBottomStrip(width: width)
+        case .faintWash:
+            LinearGradient(gradient: WheelPalette.colorZonesAxis, startPoint: .leading, endPoint: .trailing)
+                .opacity(0.16)
+                .allowsHitTesting(false)
+            referenceLines(width: width)
+            hueBottomStrip(width: width)
+        case .photoStrip:
+            referenceLines(width: width)
+            photoHueStrip(width: width)
+            hueBottomStrip(width: width)
+        }
+    }
+
+    /// A 6pt hue strip inset along the graph's bottom edge — the axis key, without coloring the
+    /// graph itself.
+    private func hueBottomStrip(width: CGFloat) -> some View {
+        LinearGradient(gradient: WheelPalette.colorZonesAxis, startPoint: .leading, endPoint: .trailing)
+            .frame(width: width, height: 6)
+            .position(x: width / 2, y: height - 3)
+            .allowsHitTesting(false)
+    }
+
+    /// Discrete bars from the center line to the curve, each in its own hue — the "EQ" reading of
+    /// Color Zones: a bar only exists where that hue is being changed.
+    private func hueEQBars(width: CGFloat) -> some View {
+        let spline = RGBCurveSpline(points: sortedPoints.map { (x: $0.x, y: $0.y) }, type: splineType)
+        return Canvas { context, _ in
+            let count = 48
+            let slot = width / CGFloat(count)
+            let midY = height / 2
+            for i in 0..<count {
+                let x = (Double(i) + 0.5) / Double(count)
+                let y = (1 - CGFloat(spline.evaluate(x))) * height
+                guard abs(y - midY) > 0.5 else { continue }
+                let rect = CGRect(x: CGFloat(i) * slot + 1, y: min(y, midY), width: max(1, slot - 2), height: abs(y - midY))
+                context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(WheelPalette.colorZonesColor(at: x).opacity(0.8)))
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// A hue strip lit by *this photo's* colors, stacked directly on top of the plain
+    /// `hueBottomStrip` — each hue's brightness follows the hue histogram, so hues the photo
+    /// doesn't contain fade out, while the full strip below still keys the whole axis.
+    private func photoHueStrip(width: CGFloat) -> some View {
+        Canvas { context, _ in
+            let bins = histogram ?? []
+            let count = bins.isEmpty ? 72 : bins.count
+            let slot = width / CGFloat(count)
+            for i in 0..<count {
+                let x = (Double(i) + 0.5) / Double(count)
+                let presence = bins.isEmpty ? 1 : Double(bins[i])
+                let rect = CGRect(x: CGFloat(i) * slot, y: height - 6 - 8, width: slot + 0.5, height: 8)
+                context.fill(Path(rect), with: .color(WheelPalette.colorZonesColor(at: x).opacity(0.12 + 0.88 * presence)))
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func hueCenterStripe(width: CGFloat) -> some View {
+        LinearGradient(gradient: WheelPalette.colorZonesAxis, startPoint: .leading, endPoint: .trailing)
+            .frame(width: width, height: 6)
+            .position(x: width / 2, y: height / 2)
+            .allowsHitTesting(false)
+    }
+
+    /// The region between the curve and the center line, filled with the hue at each x — so a
+    /// bump over the greens glows green, and a flat curve shows no color at all beyond the stripe.
+    /// Fades from strong at the curve to faint at the center line.
+    private func hueTintFill(width: CGFloat) -> some View {
+        let spline = RGBCurveSpline(points: sortedPoints.map { (x: $0.x, y: $0.y) }, type: splineType)
+        let steps = 96
+        let midY = height / 2
+        let area = Path { path in
+            path.move(to: CGPoint(x: 0, y: midY))
+            for i in 0...steps {
+                let x = Double(i) / Double(steps)
+                path.addLine(to: screenPoint(for: SIMD2(x, spline.evaluate(x)), width: width))
+            }
+            path.addLine(to: CGPoint(x: width, y: midY))
+            path.closeSubpath()
+        }
+        return LinearGradient(gradient: WheelPalette.colorZonesAxis, startPoint: .leading, endPoint: .trailing)
+            .mask(
+                area.fill(LinearGradient(
+                    stops: [
+                        .init(color: .white.opacity(0.55), location: 0),
+                        .init(color: .white.opacity(0.12), location: 0.5),
+                        .init(color: .white.opacity(0.55), location: 1),
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                ))
+            )
+            .allowsHitTesting(false)
     }
 
     // MARK: - Geometry
@@ -302,7 +515,7 @@ struct CurveEditorControl: View {
         }
     }
 
-    private func curveStroke(width: CGFloat) -> some View {
+    private func curveStroke(width: CGFloat, style: AnyShapeStyle? = nil, lineWidth: CGFloat = 1.5) -> some View {
         let spline = RGBCurveSpline(points: sortedPoints.map { (x: $0.x, y: $0.y) }, type: splineType)
         let steps = 96
         return Path { path in
@@ -313,7 +526,7 @@ struct CurveEditorControl: View {
                 if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
             }
         }
-        .stroke(lineColor, lineWidth: 1.5)
+        .stroke(style ?? AnyShapeStyle(lineColor), lineWidth: lineWidth)
     }
 
     /// Invisible full-size layer beneath the point handles; a tap here that doesn't land on an
@@ -354,13 +567,13 @@ struct CurveEditorControl: View {
                     .rotationEffect(.degrees(index == 0 ? 0 : 90))
                     .shadow(radius: 1)
             } else {
+                // Same point style as the RGB curve (`CurveComponents`' point handles): a small
+                // outlined white dot that grows and takes the accent color while dragged.
+                let isDragging = (draggingPointIndex ?? presentedDragIndex) == index
                 Circle()
-                    .fill(Color.white)
-                    .frame(width: 13, height: 13)
-                    .shadow(radius: 1)
-                Circle()
-                    .fill(Color.primary.opacity(0.4))
-                    .frame(width: 3, height: 3)
+                    .fill(isDragging ? uiColors.accentColor : Color.white)
+                    .overlay(Circle().strokeBorder(Color.black.opacity(0.35), lineWidth: 1))
+                    .frame(width: isDragging ? 11 : 8, height: isDragging ? 11 : 8)
             }
         }
         .contentShape(Circle())
@@ -371,10 +584,12 @@ struct CurveEditorControl: View {
                     if useEndpointDrag {
                         handleEndpointDrag(value, originalValue: p, isTop: index == sortedPoints.count - 1, width: width, height: height)
                     } else {
+                        draggingPointIndex = index
                         updatePoint(originalValue: p, to: curveValue(for: value.location, width: width))
                     }
                 }
                 .onEnded { _ in
+                    draggingPointIndex = nil
                     guard useEndpointDrag else { return }
                     draggingEndpointIndex = nil
                     previousEndpointDragY = nil

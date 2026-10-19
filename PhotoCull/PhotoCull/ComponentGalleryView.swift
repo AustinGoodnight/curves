@@ -46,7 +46,7 @@ struct ComponentGalleryView: View {
 
     // Curves
     @State private var rgbCurvePoints: [SIMD2<Double>] = [[0, 0], [0.25, 0.18], [0.75, 0.84], [1, 1]]
-    @State private var hueCurvePoints: [SIMD2<Double>] = ColorZonesParameters.identityPoints
+    @State private var hueCurvePoints: [SIMD2<Double>] = [[0, 0.5], [0.3, 0.72], [0.5, 0.5], [0.78, 0.3], [1, 0.5]]
 
     // Grid toolbar controls
     @State private var store = DetailStore()
@@ -68,7 +68,9 @@ struct ComponentGalleryView: View {
                 fadersSection
                 knobsSection
                 togglesSection
-                colorSection
+                colorWheelSection
+                hueGraphSection
+                whiteBalanceSection
                 curvesSection
                 dataViewsSection
                 toolbarControlsSection
@@ -211,21 +213,48 @@ struct ComponentGalleryView: View {
         }
     }
 
-    private var colorSection: some View {
-        gallerySection("Color Controls", file: "ColorWheelControl.swift · XYWhiteBalanceControl.swift") {
-            HStack(alignment: .top, spacing: 40) {
-                specimen("Color Wheel") {
-                    ColorWheelControl(
-                        title: "Shadows", hue: $wheelHue, chroma: $wheelChroma, luminance: $wheelLuminance,
-                        maxChroma: 0.5, luminanceRange: -1...1
-                    )
+    private var colorWheelSection: some View {
+        gallerySection("Color Wheel Styles", file: "ColorWheelStyles.swift") {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(160), spacing: 16), count: 3), alignment: .leading, spacing: 20) {
+                ForEach(ColorWheelStyle.allCases) { style in
+                    specimen(style.label) {
+                        ColorWheelControl(
+                            title: "Shadows", hue: $wheelHue, chroma: $wheelChroma, luminance: $wheelLuminance,
+                            maxChroma: 0.5, luminanceRange: -1...1, style: style
+                        )
+                    }
                 }
-                specimen("XY White Balance") {
-                    XYWhiteBalanceControl(
-                        temperature: $xyTemperature, tint: $xyTint,
-                        temperatureRange: 2000...12000, tintRange: -150...150,
-                        defaultTemperature: 5500, defaultTint: 0
-                    )
+            }
+        }
+    }
+
+    private var hueGraphSection: some View {
+        gallerySection("Color Zones Graph Styles", file: "ColorZonesGraphStyles.swift") {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 24), GridItem(.flexible(), spacing: 24)], alignment: .leading, spacing: 20) {
+                ForEach(HueGraphStyle.allCases) { style in
+                    specimen(style.label) {
+                        CurveEditorControl(
+                            points: $hueCurvePoints, height: 140,
+                            identityPoints: ColorZonesParameters.identityPoints,
+                            maxPoints: ColorZonesKernel.maxNodes, splineType: .catmullRom, referenceIsFlat: true,
+                            histogram: Self.sampleHueHistogram,
+                            showHueAxis: true, showHeader: false, lineColor: .white, showGrid: true, hueStyle: style
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var whiteBalanceSection: some View {
+        let axes = WhiteBalanceAxes(defaultTemperature: 5500, defaultTint: 0)
+        return gallerySection("White Balance Styles", file: "WhiteBalanceStyles.swift") {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(230), spacing: 24), count: 2), alignment: .leading, spacing: 24) {
+                specimen("Faders") {
+                    WhiteBalanceFaderPair(temperature: $xyTemperature, tint: $xyTint, axes: axes)
+                }
+                specimen("Pad") {
+                    WhiteBalancePad(temperature: $xyTemperature, tint: $xyTint, axes: axes)
                 }
             }
         }
@@ -368,6 +397,11 @@ struct ComponentGalleryView: View {
         }
         return RGBHistogramData(r: channel(peak: 0.55, width: 0.2), g: channel(peak: 0.45, width: 0.22), b: channel(peak: 0.35, width: 0.18))
     }()
+
+    private static let sampleHueHistogram: [Float] = (0..<64).map { i in
+        let x = Float(i) / 63
+        return max(0.03, exp(-pow((x - 0.15) / 0.08, 2)) + 0.6 * exp(-pow((x - 0.75) / 0.06, 2)))
+    }
 
     private static let sampleDensity: [Float] = (0..<48).flatMap { h -> [Float] in
         let hueWeight = Float(0.3 + 0.7 * max(0, cos(Double(h) / 48 * 2 * .pi - 0.6)))

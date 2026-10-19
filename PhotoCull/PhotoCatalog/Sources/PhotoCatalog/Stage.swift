@@ -201,6 +201,13 @@ public final class Stage {
     public var editColorBalanceHighlightsY: Double?
     public var editColorBalanceHighlightsC: Double?
     public var editColorBalanceHighlightsH: Double?
+    /// Per-wheel bypass, inside the Color Wheels group — `true` sends just that wheel's Y/C/H back
+    /// to neutral while the others keep applying, without losing its values. `nil` means on (every
+    /// stage predating these reads as on). Cleared again as soon as that wheel is dragged.
+    public var editColorBalanceGlobalOff: Bool?
+    public var editColorBalanceShadowsOff: Bool?
+    public var editColorBalanceMidtonesOff: Bool?
+    public var editColorBalanceHighlightsOff: Bool?
     public var editColorBalanceContrast: Double?
     public var editColorBalanceVibrance: Double?
     public var editColorBalanceChromaGlobal: Double?

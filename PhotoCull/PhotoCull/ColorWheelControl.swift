@@ -26,6 +26,11 @@ struct ColorWheelControl: View {
     var maxChroma: Double = 0.5
     var luminanceRange: ClosedRange<Double> = -1...1
     var diameter: CGFloat = 92
+    /// See `ColorWheelStyle` — only changes what the wheel's face looks like, never how it edits.
+    var style: ColorWheelStyle = .spectrum
+    /// When passed, a `StoplightToggle` beside the title bypasses just this wheel; the wheel dims
+    /// while off, and dragging it turns it back on.
+    var isEnabled: Binding<Bool>? = nil
     var onChange: () -> Void = {}
 
     @State private var previousPuckLocation: CGPoint? = nil
@@ -34,7 +39,7 @@ struct ColorWheelControl: View {
     private let fineFactor: CGFloat = 0.2
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: controlSubtitleSpacing) {
             HStack(spacing: 4) {
                 Text(title)
                     .font(.caption)
@@ -48,7 +53,11 @@ struct ColorWheelControl: View {
                 .buttonStyle(.plain)
                 .help("Reset \(title)")
                 .disabled(hue == 0 && chroma == 0 && luminance == 0)
+                if let isEnabled {
+                    StoplightToggle(isOn: isEnabled, diameter: 8)
+                }
             }
+            .frame(height: controlSubtitleHeight)
 
             ZStack {
                 // Hit region for the luminance arc — a padded band following the arc's own curve,
@@ -69,20 +78,27 @@ struct ColorWheelControl: View {
                 arcFill
 
                 ZStack {
-                    Circle()
-                        .fill(AngularGradient(gradient: Self.hueSpectrum, center: .center))
-                        .overlay(RadialGradient(colors: [.white, .white.opacity(0)], center: .center, startRadius: 0, endRadius: diameter / 2))
+                    if style == .spectrum {
+                        Circle()
+                            .fill(AngularGradient(gradient: Self.hueSpectrum, center: .center))
+                            .overlay(RadialGradient(colors: [.white, .white.opacity(0)], center: .center, startRadius: 0, endRadius: diameter / 2))
 
-                    Circle()
-                        .fill(Color.primary.opacity(0.4))
-                        .frame(width: 3, height: 3)
+                        Circle()
+                            .fill(Color.primary.opacity(0.4))
+                            .frame(width: 3, height: 3)
 
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: puckDiameter, height: puckDiameter)
-                        .shadow(radius: 1)
-                        .offset(puckOffset)
-                        .allowsHitTesting(false)
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: puckDiameter, height: puckDiameter)
+                            .shadow(radius: 1)
+                            .offset(puckOffset)
+                            .allowsHitTesting(false)
+                    } else {
+                        ColorWheelFace(
+                            style: style, diameter: diameter, hue: hue, radiusFraction: radiusFraction,
+                            puckOffset: puckOffset, puckDiameter: puckDiameter
+                        )
+                    }
                 }
                 .frame(width: diameter, height: diameter)
                 .contentShape(Circle())
@@ -93,6 +109,7 @@ struct ColorWheelControl: View {
                     .allowsHitTesting(false)
             }
             .frame(width: containerSize, height: containerSize)
+            .opacity(isEnabled?.wrappedValue == false ? 0.4 : 1)
             // A plain `.overlay` rather than a shared `ZStack(alignment:)` — the arc `Path`
             // shapes above render correctly only under this `ZStack`'s *default* `.center`
             // alignment (their own drawn coordinates already assume that placement); changing
@@ -108,6 +125,10 @@ struct ColorWheelControl: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .allowsHitTesting(false)
+            }
+
+            if style == .ringReadout {
+                ColorWheelReadout(hue: $hue, chroma: $chroma, maxChroma: maxChroma, onChange: onChange)
             }
         }
     }
@@ -127,8 +148,14 @@ struct ColorWheelControl: View {
     // minimum, if it doesn't span 0) sits at 0°/rightmost; the range's maximum is at -85° (top);
     // the minimum at +85° (bottom) — "up is more," matching every other slider in the editor.
 
-    private var arcRadius: CGFloat { diameter / 2 + 16 }
-    private var containerSize: CGFloat { 2 * (arcRadius + 10) }
+    private var arcRadius: CGFloat { Self.arcRadius(forDiameter: diameter) }
+    private static func arcRadius(forDiameter diameter: CGFloat) -> CGFloat { diameter / 2 + 16 }
+    private var containerSize: CGFloat { Self.containerSize(forDiameter: diameter) }
+
+    /// The dial + luminance arc's square bounding box for a given dial `diameter` — exposed so
+    /// `ColorBalanceBarView` can size its other columns' content slots to match, putting every
+    /// control's center on the same line as the wheels'.
+    static func containerSize(forDiameter diameter: CGFloat) -> CGFloat { 2 * (arcRadius(forDiameter: diameter) + 10) }
     private let arcAngleLimit: Double = 85
 
     private func arcPoint(angleDegrees: Double, radius: CGFloat? = nil) -> CGPoint {
@@ -202,10 +229,12 @@ struct ColorWheelControl: View {
 
     private var arcThumb: some View {
         let p = arcPoint(angleDegrees: arcAngle(forFraction: luminanceFraction(luminance)))
+        // Same outlined dot as the curve editors' points; accent-colored and larger mid-drag.
+        let isDragging = previousArcTheta != nil
         return Circle()
-            .fill(Color.white)
-            .frame(width: 12, height: 12)
-            .shadow(radius: 1)
+            .fill(isDragging ? uiColors.accentColor : Color.white)
+            .overlay(Circle().strokeBorder(Color.black.opacity(0.35), lineWidth: 1))
+            .frame(width: isDragging ? 11 : 8, height: isDragging ? 11 : 8)
             .position(p)
     }
 
@@ -228,9 +257,14 @@ struct ColorWheelControl: View {
                     luminance = luminanceRange.lowerBound + fraction * (luminanceRange.upperBound - luminanceRange.lowerBound)
                 }
                 previousArcTheta = theta
+                reenable()
                 onChange()
             }
             .onEnded { _ in previousArcTheta = nil }
+    }
+
+    private func reenable() {
+        if isEnabled?.wrappedValue == false { isEnabled?.wrappedValue = true }
     }
 
     private func reset() {
@@ -287,6 +321,7 @@ struct ColorWheelControl: View {
                     applyPuckPosition(CGSize(width: value.location.x - center.x, height: value.location.y - center.y))
                 }
                 previousPuckLocation = value.location
+                reenable()
                 onChange()
             }
             .onEnded { _ in previousPuckLocation = nil }

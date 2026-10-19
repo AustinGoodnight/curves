@@ -175,9 +175,15 @@ struct PointCurveEditor: View {
     var focusX: Binding<Double?>? = nil
     /// `false` when `CurveEdgeHandles` owns the endpoints (drawn and dragged there instead).
     var editsEndpoints = true
+    /// Draws a drag in progress on this point index without a real gesture — for
+    /// `MarketingExport`'s scripted interaction videos. `nil` (the default) in the app.
+    var presentedDragIndex: Int? = nil
+    /// Same, for the pointer resting over the graph (shows the points under `pointsOnlyOnHover`).
+    var presentsHover = false
     @Environment(ColorSchemeStore.self) private var uiColors
 
-    @State private var dragIndex: Int?
+    @State private var gestureDragIndex: Int?
+    private var dragIndex: Int? { gestureDragIndex ?? presentedDragIndex }
     @State private var dragStart: SIMD2<Double>?
     @State private var hover: CGPoint?
 
@@ -187,7 +193,7 @@ struct PointCurveEditor: View {
             let current = normalizedCurve(points)
             ZStack(alignment: .topLeading) {
                 CurveBackdrop(points: current, histogram: histogram, lineColor: uiColors.accentColor, grid: grid)
-                if !pointsOnlyOnHover || hover != nil || dragIndex != nil {
+                if !pointsOnlyOnHover || hover != nil || presentsHover || dragIndex != nil {
                     ForEach(editsEndpoints ? Array(current.indices) : Array(current.indices.dropFirst().dropLast()), id: \.self) { i in
                         let p = current[i]
                         Circle()
@@ -214,10 +220,10 @@ struct PointCurveEditor: View {
             .onContinuousHover { phase in
                 if case .active(let location) = phase {
                     hover = location
-                    if dragIndex == nil { focusX?.wrappedValue = clampUnit(location.x / size.width) }
+                    if gestureDragIndex == nil { focusX?.wrappedValue = clampUnit(location.x / size.width) }
                 } else {
                     hover = nil
-                    if dragIndex == nil { focusX?.wrappedValue = nil }
+                    if gestureDragIndex == nil { focusX?.wrappedValue = nil }
                 }
             }
             .gesture(dragGesture(size: size))
@@ -242,9 +248,9 @@ struct PointCurveEditor: View {
         DragGesture(minimumDistance: 0)
             .onChanged { drag in
                 var current = normalizedCurve(points)
-                if dragIndex == nil {
+                if gestureDragIndex == nil {
                     if let hit = nearestIndex(to: drag.startLocation, in: current, size: size) {
-                        dragIndex = hit
+                        gestureDragIndex = hit
                     } else if current.count < curveMaxPoints {
                         let rawX = clampUnit(drag.startLocation.x / size.width)
                         let range = interiorRange(current, margin: 0.01)
@@ -253,14 +259,14 @@ struct PointCurveEditor: View {
                         let y = clampUnit(curveSpline(current).evaluate(x))
                         current.append(SIMD2(x, y))
                         current.sort { $0.x < $1.x }
-                        dragIndex = current.firstIndex { $0.x == x }
+                        gestureDragIndex = current.firstIndex { $0.x == x }
                         points = current
                     } else {
                         return
                     }
-                    dragStart = dragIndex.map { current[$0] }
+                    dragStart = gestureDragIndex.map { current[$0] }
                 }
-                guard let index = dragIndex, let start = dragStart, current.indices.contains(index) else { return }
+                guard let index = gestureDragIndex, let start = dragStart, current.indices.contains(index) else { return }
                 let fine = NSEvent.modifierFlags.contains(.shift) ? 0.25 : 1
                 var x = start.x + Double(drag.translation.width / size.width) * fine
                 var y = clampUnit(start.y - Double(drag.translation.height / size.height) * fine)
@@ -274,7 +280,7 @@ struct PointCurveEditor: View {
                 focusX?.wrappedValue = x
             }
             .onEnded { _ in
-                dragIndex = nil
+                gestureDragIndex = nil
                 dragStart = nil
             }
     }

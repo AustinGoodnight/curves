@@ -40,6 +40,10 @@ struct StageFieldSnapshot: Codable, Equatable, Sendable {
     var editColorBalanceHighlightsY: Double?
     var editColorBalanceHighlightsC: Double?
     var editColorBalanceHighlightsH: Double?
+    var editColorBalanceGlobalOff: Bool?
+    var editColorBalanceShadowsOff: Bool?
+    var editColorBalanceMidtonesOff: Bool?
+    var editColorBalanceHighlightsOff: Bool?
     var editColorBalanceContrast: Double?
     var editColorBalanceVibrance: Double?
     var editColorBalanceChromaGlobal: Double?
@@ -112,6 +116,10 @@ struct StageFieldSnapshot: Codable, Equatable, Sendable {
         editColorBalanceHighlightsY = stage.editColorBalanceHighlightsY
         editColorBalanceHighlightsC = stage.editColorBalanceHighlightsC
         editColorBalanceHighlightsH = stage.editColorBalanceHighlightsH
+        editColorBalanceGlobalOff = stage.editColorBalanceGlobalOff
+        editColorBalanceShadowsOff = stage.editColorBalanceShadowsOff
+        editColorBalanceMidtonesOff = stage.editColorBalanceMidtonesOff
+        editColorBalanceHighlightsOff = stage.editColorBalanceHighlightsOff
         editColorBalanceContrast = stage.editColorBalanceContrast
         editColorBalanceVibrance = stage.editColorBalanceVibrance
         editColorBalanceChromaGlobal = stage.editColorBalanceChromaGlobal
@@ -185,6 +193,10 @@ struct StageFieldSnapshot: Codable, Equatable, Sendable {
         stage.editColorBalanceHighlightsY = editColorBalanceHighlightsY
         stage.editColorBalanceHighlightsC = editColorBalanceHighlightsC
         stage.editColorBalanceHighlightsH = editColorBalanceHighlightsH
+        stage.editColorBalanceGlobalOff = editColorBalanceGlobalOff
+        stage.editColorBalanceShadowsOff = editColorBalanceShadowsOff
+        stage.editColorBalanceMidtonesOff = editColorBalanceMidtonesOff
+        stage.editColorBalanceHighlightsOff = editColorBalanceHighlightsOff
         stage.editColorBalanceContrast = editColorBalanceContrast
         stage.editColorBalanceVibrance = editColorBalanceVibrance
         stage.editColorBalanceChromaGlobal = editColorBalanceChromaGlobal
@@ -291,6 +303,10 @@ extension StageFieldSnapshot {
             result.editColorBalanceHighlightsY = next.editColorBalanceHighlightsY ?? result.editColorBalanceHighlightsY
             result.editColorBalanceHighlightsC = next.editColorBalanceHighlightsC ?? result.editColorBalanceHighlightsC
             result.editColorBalanceHighlightsH = next.editColorBalanceHighlightsH ?? result.editColorBalanceHighlightsH
+            result.editColorBalanceGlobalOff = next.editColorBalanceGlobalOff ?? result.editColorBalanceGlobalOff
+            result.editColorBalanceShadowsOff = next.editColorBalanceShadowsOff ?? result.editColorBalanceShadowsOff
+            result.editColorBalanceMidtonesOff = next.editColorBalanceMidtonesOff ?? result.editColorBalanceMidtonesOff
+            result.editColorBalanceHighlightsOff = next.editColorBalanceHighlightsOff ?? result.editColorBalanceHighlightsOff
             result.editColorBalanceContrast = next.editColorBalanceContrast ?? result.editColorBalanceContrast
             result.editColorBalanceVibrance = next.editColorBalanceVibrance ?? result.editColorBalanceVibrance
             result.editColorBalanceChromaGlobal = next.editColorBalanceChromaGlobal ?? result.editColorBalanceChromaGlobal
@@ -357,6 +373,7 @@ extension StageFieldSnapshot {
             || editColorBalanceMidtonesY != other.editColorBalanceMidtonesY || editColorBalanceMidtonesC != other.editColorBalanceMidtonesC
             || editColorBalanceMidtonesH != other.editColorBalanceMidtonesH || editColorBalanceHighlightsY != other.editColorBalanceHighlightsY
             || editColorBalanceHighlightsC != other.editColorBalanceHighlightsC || editColorBalanceHighlightsH != other.editColorBalanceHighlightsH
+            || editColorBalanceGlobalOff != other.editColorBalanceGlobalOff || editColorBalanceShadowsOff != other.editColorBalanceShadowsOff || editColorBalanceMidtonesOff != other.editColorBalanceMidtonesOff || editColorBalanceHighlightsOff != other.editColorBalanceHighlightsOff
             || editColorBalanceContrast != other.editColorBalanceContrast || editColorBalanceVibrance != other.editColorBalanceVibrance
             || editColorBalanceChromaGlobal != other.editColorBalanceChromaGlobal {
             changed.insert("Color Balance RGB")

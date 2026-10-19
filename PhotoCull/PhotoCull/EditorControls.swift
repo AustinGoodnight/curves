@@ -114,6 +114,16 @@ func slider(
 /// other way around) so the color wheels come out the same height as these, not vice versa.
 let colorFaderTrackHeight: CGFloat = 200
 
+/// Height of the per-control title row directly above each control in `ColorBalanceBarView`
+/// ("Global ⟲ ●" over a wheel, "White Balance" over the WB pad, Color Zones' channel tabs) —
+/// fixed rather than each control's own natural text height, so that row lines up across every
+/// column regardless of whether it carries a stoplight, a reset button, or just text. Fits
+/// `StoplightToggle`'s 8pt-diameter hit frame (20pt) plus room for the tabs' underline.
+let controlSubtitleHeight: CGFloat = 22
+
+/// Gap between that title row and the control below it — shared for the same reason.
+let controlSubtitleSpacing: CGFloat = 6
+
 /// Fixed width for every vertical fader's title-plus-track column (`verticalGradientSlider`/
 /// `verticalCircleSlider`) — wide enough to fit the longest label ("Dehaze") without wrapping.
 /// Without this, each column's `VStack` sizes itself to its own widest child, and since the
@@ -121,7 +131,7 @@ let colorFaderTrackHeight: CGFloat = 200
 /// each produced a different column width purely from their own label's character count, even
 /// though every track underneath rendered at the same 18pt. Pinning one shared width here is
 /// what actually makes every fader column read as the same size next to its neighbors.
-private let faderColumnWidth: CGFloat = 48
+let faderColumnWidth: CGFloat = 48
 
 /// Labeled wrapper around `VerticalGradientSlider` — title above, value pill below, matching the
 /// chrome `slider()` puts around `MinimalSlider`. `valueText` empty skips the pill entirely
@@ -153,42 +163,6 @@ func verticalGradientSlider(
         }
     }
     .frame(width: faderColumnWidth)
-}
-
-/// Labeled wrapper around `XYWhiteBalanceControl` — title above (mimicking a single fader
-/// column's own caption, at the same font/spacing `verticalGradientSlider`'s `Text(title)` uses,
-/// so `titledGroup`'s `.contentTop` alignment guide — tuned against that exact caption height —
-/// still lands on the pad itself), value pills for Temp/Tint below instead of one.
-func xyWhiteBalanceControl(
-    temperature: Binding<Double>,
-    tint: Binding<Double>,
-    temperatureRange: ClosedRange<Double>,
-    tintRange: ClosedRange<Double>,
-    defaultTemperature: Double,
-    defaultTint: Double,
-    temperatureText: String,
-    tintText: String
-) -> some View {
-    VStack(spacing: 8) {
-        Text("White Balance")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize()
-        XYWhiteBalanceControl(
-            temperature: temperature, tint: tint,
-            temperatureRange: temperatureRange, tintRange: tintRange,
-            defaultTemperature: defaultTemperature, defaultTint: defaultTint
-        )
-        HStack(spacing: 6) {
-            Text(temperatureText)
-            Text(tintText)
-        }
-        .font(.caption)
-        .monospacedDigit()
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
-    }
 }
 
 /// Labeled wrapper around `VerticalCircleSlider` — same title-above/value-pill-below chrome as

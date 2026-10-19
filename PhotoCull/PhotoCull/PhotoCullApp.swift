@@ -24,6 +24,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
         registerBundledFonts()
+        // `--export-marketing <dir>`: render the website stills/animation frames and quit.
+        if MarketingExport.isRequested {
+            MarketingExport.runAndExit()
+        }
     }
 
     /// Registers `Fonts/ScoutieSans.ttf` — a variable font (weight 200...800 plus italics), used

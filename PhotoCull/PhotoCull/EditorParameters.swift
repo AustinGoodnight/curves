@@ -130,20 +130,25 @@ func colorBalanceParameters(for stage: Stage) -> ColorBalanceRGBParameters? {
     guard stage.editColorBalanceEnabled else { return nil }
     let d = ColorBalanceRGBParameters.darktableDefault
     let wheels = stage.editColorWheelsEnabled
+    // Each wheel's own bypass (`editColorBalanceShadowsOff` etc.) on top of the group's.
+    let global = wheels && stage.editColorBalanceGlobalOff != true
+    let shadows = wheels && stage.editColorBalanceShadowsOff != true
+    let midtones = wheels && stage.editColorBalanceMidtonesOff != true
+    let highlights = wheels && stage.editColorBalanceHighlightsOff != true
     let balance = stage.editBalanceEnabled
     return ColorBalanceRGBParameters(
-        shadowsY: wheels ? (stage.editColorBalanceShadowsY ?? d.shadowsY) : d.shadowsY,
-        shadowsC: wheels ? (stage.editColorBalanceShadowsC ?? d.shadowsC) : d.shadowsC,
-        shadowsH: wheels ? (stage.editColorBalanceShadowsH ?? d.shadowsH) : d.shadowsH,
-        midtonesY: wheels ? (stage.editColorBalanceMidtonesY ?? d.midtonesY) : d.midtonesY,
-        midtonesC: wheels ? (stage.editColorBalanceMidtonesC ?? d.midtonesC) : d.midtonesC,
-        midtonesH: wheels ? (stage.editColorBalanceMidtonesH ?? d.midtonesH) : d.midtonesH,
-        highlightsY: wheels ? (stage.editColorBalanceHighlightsY ?? d.highlightsY) : d.highlightsY,
-        highlightsC: wheels ? (stage.editColorBalanceHighlightsC ?? d.highlightsC) : d.highlightsC,
-        highlightsH: wheels ? (stage.editColorBalanceHighlightsH ?? d.highlightsH) : d.highlightsH,
-        globalY: wheels ? (stage.editColorBalanceGlobalY ?? d.globalY) : d.globalY,
-        globalC: wheels ? (stage.editColorBalanceGlobalC ?? d.globalC) : d.globalC,
-        globalH: wheels ? (stage.editColorBalanceGlobalH ?? d.globalH) : d.globalH,
+        shadowsY: shadows ? (stage.editColorBalanceShadowsY ?? d.shadowsY) : d.shadowsY,
+        shadowsC: shadows ? (stage.editColorBalanceShadowsC ?? d.shadowsC) : d.shadowsC,
+        shadowsH: shadows ? (stage.editColorBalanceShadowsH ?? d.shadowsH) : d.shadowsH,
+        midtonesY: midtones ? (stage.editColorBalanceMidtonesY ?? d.midtonesY) : d.midtonesY,
+        midtonesC: midtones ? (stage.editColorBalanceMidtonesC ?? d.midtonesC) : d.midtonesC,
+        midtonesH: midtones ? (stage.editColorBalanceMidtonesH ?? d.midtonesH) : d.midtonesH,
+        highlightsY: highlights ? (stage.editColorBalanceHighlightsY ?? d.highlightsY) : d.highlightsY,
+        highlightsC: highlights ? (stage.editColorBalanceHighlightsC ?? d.highlightsC) : d.highlightsC,
+        highlightsH: highlights ? (stage.editColorBalanceHighlightsH ?? d.highlightsH) : d.highlightsH,
+        globalY: global ? (stage.editColorBalanceGlobalY ?? d.globalY) : d.globalY,
+        globalC: global ? (stage.editColorBalanceGlobalC ?? d.globalC) : d.globalC,
+        globalH: global ? (stage.editColorBalanceGlobalH ?? d.globalH) : d.globalH,
         chromaGlobal: balance ? (stage.editColorBalanceChromaGlobal ?? d.chromaGlobal) : d.chromaGlobal,
         vibrance: balance ? (stage.editColorBalanceVibrance ?? d.vibrance) : d.vibrance,
         contrast: stage.editColorBalanceContrast ?? d.contrast
