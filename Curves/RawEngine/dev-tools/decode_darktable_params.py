@@ -11,7 +11,7 @@ base64-decoding works regardless of their value). This was reverse-engineered fr
 fixture, not from darktable's source (its XMP writer is in C++ engine internals not pulled into
 this session) — verified correct by successfully decoding real field data into physically
 sane values that also happened to match this app's own darktable-derived defaults exactly
-(see PROJECT_BRIEF.md / RawEngine's FilmicRGBParameters).
+(see RawEngine's FilmicRGBParameters).
 
 Field specs below are transcribed directly from the real `dt_iop_..._params_t` struct
 definitions in darktable's source (`src/iop/*.c`, tag release-5.6.0) — see the comment above

@@ -3,12 +3,12 @@ import PhotoCatalog
 import SwiftData
 
 /// Repopulates an empty `ModelContainer` from sidecar files on disk — the actual point of the whole
-/// sidecar-persistence design (see this project's CLAUDE.md and `SidecarModels.swift`'s doc
+/// sidecar-persistence design (see `SidecarModels.swift`'s doc
 /// comment): a schema break used to mean "start over empty"; this makes it mean "rescan and
 /// restore." Run only in two places, deliberately never on a normal successful launch — see
 /// `CurvesApp.swift`'s `ModelContainer` failure path and `ContentView`'s manual "Rescan" action —
-/// since this reads every sidecar in every known folder, which is exactly the kind of cost this
-/// codebase's CLAUDE.md warns against paying inside a live, `@Query`-driven view.
+/// since this reads every sidecar in every known folder, which is exactly the kind of cost
+/// `docs/PERFORMANCE.md` warns against paying inside a live, `@Query`-driven view.
 @MainActor
 enum CacheRebuilder {
     /// One pass per known session folder (see `KnownSessionFolders`): re-imports every image file

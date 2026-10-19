@@ -14,7 +14,7 @@ import PhotoCatalog
 /// predicate itself. Global presets are grouped by `PresetFolder`; folders are created and
 /// presets filed into them from Settings > Presets (`PresetManagerView`). Grouping here is done in
 /// `body` directly: it's a pass over the (small, user-curated) preset list, never over
-/// `allAssets`, so it's outside what this project's CLAUDE.md performance rules are about.
+/// `allAssets`, so it's outside what `docs/PERFORMANCE.md` performance rules are about.
 ///
 /// Applying a preset (tapping its row) always adds a new **stage** to the currently-open photo —
 /// see `Preset`'s doc comment for why it's never a scene.

@@ -7,7 +7,7 @@ import PhotoCatalog
 /// number/flag keys rather than clicking through the grid one photo at a time.
 ///
 /// `currentIndex` is local `@State`, not `DetailStore` — it changes on every arrow-key press, and
-/// per `CLAUDE.md`'s state-ownership rule that kind of high-frequency state belongs on the
+/// per `docs/PERFORMANCE.md`'s state-ownership rule that kind of high-frequency state belongs on the
 /// smallest view that needs it, not on a shared object that would invalidate other views too.
 /// `store.filteredAssets` is read once per `body` evaluation into a local `let` and threaded
 /// through every helper as a parameter, matching `CullingGridView`'s own convention, rather than

@@ -2,14 +2,14 @@
 
 Dev-time tools for checking `FilmicSpline`/`FilmicRGBKernel` and `ColorBalanceRGBProcessor`/
 `ColorBalanceRGBKernel` against real darktable behavior. Not part of the app or the automated
-test target — these need a local darktable install and the test RAW fixture from
-`PROJECT_BRIEF.md`, neither of which is portable to CI.
+test target — these need a local darktable install and a local test RAW
+fixture, neither of which is portable to CI.
 
 ## What this does and does not prove
 
 A literal pixel-diff between our full pipeline's export and darktable-cli's full export is
 **not achievable and not meaningful** for this phase: `CIRAWFilter` (our validated demosaic
-engine, see `PROJECT_BRIEF.md`) and darktable's own demosaic/color pipeline are different
+engine, see the main README) and darktable's own demosaic/color pipeline are different
 implementations that will never agree pixel-for-pixel upstream of filmic, regardless of whether
 the filmic port itself is correct. This harness instead checks the two things that actually
 isolate whether the *port* is correct:
@@ -34,7 +34,7 @@ difference). The visual side-by-side below is a sanity check, not a pass/fail ga
 ## Reproducing
 
 ```bash
-# 1. Render darktable's authentic output for the real edit (isolated config, per PROJECT_BRIEF.md):
+# 1. Render darktable's authentic output for the real edit (isolated config):
 DT_APP="/Applications/darktable 2.app/Contents/MacOS/darktable-cli"
 WORK=/tmp/dt_harness
 mkdir -p "$WORK/config" "$WORK/cache" "$WORK/out"

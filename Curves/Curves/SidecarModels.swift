@@ -3,8 +3,8 @@ import PhotoCatalog
 import RawEngine
 
 /// Codable schemas for the three sidecar file kinds this app persists edit state to (`.curve` per
-/// photo, `.scene` per `PhotoScene`, `.stack` per `PhotoStack`) — see this project's CLAUDE.md and
-/// the `sidecar-persistence` branch's plan for why: SwiftData stays only as a disposable, rebuildable
+/// photo, `.scene` per `PhotoScene`, `.stack` per `PhotoStack`) — see the
+/// `sidecar-persistence` branch's plan for why: SwiftData stays only as a disposable, rebuildable
 /// query cache, these files are the actual source of truth. Every type here carries a
 /// `schemaVersion` and decodes leniently (`decodeIfPresent` via a custom `init(from:)`, added the
 /// first time a V2 of any of these is ever needed) so a sidecar's own shape can evolve without

@@ -43,8 +43,8 @@ private struct DBCamera {
 /// clamps to the nearest endpoint instead.
 ///
 /// `shared` parses all bundled XML files once, lazily, on first use — matching this codebase's
-/// established "expensive work must not repeat on every render" rule (see the app target's
-/// `CLAUDE.md`). A photo's own EXIF readouts don't change between renders, so a resolved
+/// established "expensive work must not repeat on every render" rule (see
+/// `docs/PERFORMANCE.md`). A photo's own EXIF readouts don't change between renders, so a resolved
 /// `LensCorrectionParameters` is cheap to recompute per render, but `profile(...)` itself (a linear
 /// scan with string matching over ~1500 lenses) should not be called from a SwiftUI `body` — see
 /// `EditorParameters.lensCorrectionParameters(for:)` for where it's actually called from instead.

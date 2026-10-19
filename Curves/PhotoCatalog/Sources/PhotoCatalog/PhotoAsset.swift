@@ -13,7 +13,7 @@ public final class PhotoAsset {
     /// Set each time this photo is *opened* in the editor (`ContentView.openEditor(for:)`), not on
     /// every slider tick — a per-tick write would fire a SwiftData mutation, and thus a broad
     /// `@Query` re-fire, on every single drag, which is exactly the write-side mirror of the read-
-    /// side `@Query`-invalidation traps this app's CLAUDE.md documents at length. "Opened for
+    /// side `@Query`-invalidation traps `docs/PERFORMANCE.md` documents at length. "Opened for
     /// editing" is a cheap-to-maintain proxy for "recently edited" — good enough to drive the
     /// editor sidebar's "Copy from Recent" list (`RecentEditsBrowserView`) without that cost.
     public var lastEditedDate: Date?

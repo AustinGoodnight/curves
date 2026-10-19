@@ -61,7 +61,8 @@ The project has three parts:
 
 Several processing modules are ports of [darktable](https://github.com/darktable-org/darktable)'s
 algorithms (filmic RGB, color balance RGB, AgX, color zones, RGB curve). darktable itself is
-not a runtime dependency. [`PROJECT_BRIEF.md`](PROJECT_BRIEF.md) explains why.
+not a runtime dependency: running `darktable-cli` costs 4–5 s per render, mostly fixed startup
+overhead, which is far too slow for live sliders.
 
 ## Building
 
@@ -86,6 +87,9 @@ To build the packages on their own: `swift build` inside `Curves/RawEngine` or
 
 ## Developer notes
 
+- **Performance:** read [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) before changing any SwiftUI
+  `body`. It records what caused editor and grid lag on a 1,700-photo library and how each case
+  was fixed.
 - **Developer Mode** (Settings) adds a component gallery and menus for comparing
   alternative control styles.
 - **Marketing renders:** `Curves/Tools/export-marketing.sh` renders the screenshots and

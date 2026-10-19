@@ -85,7 +85,7 @@ struct StagesSidebarView: View {
     /// `asset.versions` directly (no separate `@Query`) matches how `asset.customStages`/
     /// `asset.scene?.stage` are already read straight from `body` in this same file: a bounded,
     /// per-asset relationship read, not a library-wide query, so it doesn't carry the
-    /// `@Query`-on-every-render cost this project's `CLAUDE.md` warns about elsewhere.
+    /// `@Query`-on-every-render cost `docs/PERFORMANCE.md` warns about elsewhere.
     private var sortedVersions: [AssetVersion] {
         (asset.versions ?? []).sorted { $0.createdDate > $1.createdDate }
     }

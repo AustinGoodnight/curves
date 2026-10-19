@@ -49,7 +49,7 @@ final class DetailStore {
     /// The session grid's column count — one of `Self.gridColumnSteps`, never a value computed from
     /// window/container width. See `CullingGridView.columnCount`'s doc comment for why this stays a
     /// small, fixed set of prefixed steps rather than continuous `GeometryReader`-driven sizing:
-    /// that measuring pass is what caused this project's worst click-lag regression (CLAUDE.md).
+    /// that measuring pass is what caused this project's worst click-lag regression (`docs/PERFORMANCE.md`).
     /// Low-frequency (one user zoom action at a time), same as `isCullingViewActive`, so it's fine
     /// to live here and be read directly by `GridPane`/`ContentView` rather than needing the
     /// `.onChange`-driven caching `selection`/`filteredAssets` require.
@@ -519,7 +519,7 @@ struct FileTypeFilterControl: View {
 /// "Done" button).
 /// "Dev" in the title bar — flips Developer Mode (Settings › Developer) without opening Settings.
 /// Its own `View` type holding the `@AppStorage`, so toggling it only re-renders this button, never
-/// `ContentView.body` (see this project's CLAUDE.md on state living on the wrong view). Flat
+/// `ContentView.body` (see `docs/PERFORMANCE.md` on state living on the wrong view). Flat
 /// caption text like its RAW/JPG/Stack/Scene neighbors; accent-colored while on.
 struct DeveloperModeToolbarToggle: View {
     @AppStorage(AppSettingsKey.developerMode) private var developerMode = false

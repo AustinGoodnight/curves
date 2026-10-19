@@ -3,7 +3,7 @@ import SwiftData
 import AppKit
 import PhotoCatalog
 
-/// ⚠️ PERFORMANCE TRAP — see `CLAUDE.md` at the repo root for the full writeup. Short version:
+/// ⚠️ PERFORMANCE TRAP — see `docs/PERFORMANCE.md` for the full writeup. Short version:
 /// 1. Never read an expensive computed property (anything that filters/scans `allAssets`/
 ///    `scenes`/`sessions`) directly inside `body`/`toolbarContent`.
 /// 2. Never put frequently-mutated state (anything that changes on every click, like selection)

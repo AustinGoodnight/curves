@@ -8,7 +8,7 @@ import Foundation
 /// `ThumbnailInvalidationBus.shared.box(for:)` itself never registers an Observation dependency
 /// (it's a plain method on a non-`@Observable` class); only the returned box's `value` is tracked,
 /// which is what keeps this scoped instead of falling into the "one `@State` invalidates everything
-/// that reads it" trap this project's CLAUDE.md documents at length.
+/// that reads it" trap `docs/PERFORMANCE.md` documents at length.
 @Observable
 final class ThumbnailVersionBox: @unchecked Sendable {
     var value = 0

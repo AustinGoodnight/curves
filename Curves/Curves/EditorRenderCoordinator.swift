@@ -30,7 +30,7 @@ final class EditorRenderCoordinator {
     /// Called with a freshly-rendered, non-draft preview whenever one finishes — `EditorView` uses
     /// this only to refresh the cached grid/filmstrip thumbnail so it reflects the edit (see
     /// `updateSessionThumbnail(for:from:)`). Never fired for a draft (mid-drag) render — regenerating
-    /// a thumbnail on every slider tick would be exactly the per-tick cost this project's CLAUDE.md
+    /// a thumbnail on every slider tick would be exactly the per-tick cost `docs/PERFORMANCE.md`
     /// warns against; the settle pass in `startRenderLoopIfNeeded` already gives one crisp render per
     /// pause, which is the right cadence for this too.
     var onSettledRender: ((CGImage) -> Void)?
